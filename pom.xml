@@ -1,0 +1,82 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <description>In-memory storage to avoid requests to database, support hashmap-based indices, Nocturne class-reloading magic. Built upon Jucuzzi.</description>
+    <inceptionYear>2009</inceptionYear>
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.codeforces.inmemo</groupId>
+    <artifactId>inmemo</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>inmemo</name>
+    <url>https://github.com/Codeforces/inmemo</url>
+    <developers>
+        <developer>
+            <id>MikeMirzayanov</id>
+            <name>Mike Mirzayanov</name>
+            <email>mirzayanovmr@gmail.com</email>
+            <roles>
+                <role>owner, author</role>
+            </roles>
+            <timezone>+4</timezone>
+            <properties/>
+        </developer>
+    </developers>
+    <issueManagement>
+        <system>GitHub</system>
+        <url>https://github.com/Codeforces/inmemo/issues</url>
+    </issueManagement>
+    <licenses>
+        <license>
+            <name>The MIT License (MIT)</name>
+            <url>https://github.com/Codeforces/inmemo/blob/master/LICENSE</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <scm>
+        <connection>scm:git:https://github.com/Codeforces/inmemo.git</connection>
+        <developerConnection>scm:git:https://github.com/Codeforces/inmemo.git</developerConnection>
+        <url>https://github.com/Codeforces/inmemo.git</url>
+    </scm>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.1</version>
+                <configuration>
+                    <source>1.7</source>
+                    <target>1.7</target>
+                    <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+    <dependencies>
+        <dependency>
+            <groupId>jacuzzi</groupId>
+            <artifactId>jacuzzi</artifactId>
+            <version>0.0.32-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>org.hsqldb</groupId>
+            <artifactId>hsqldb</artifactId>
+            <version>2.3.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.10</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>c3p0</groupId>
+            <artifactId>c3p0</artifactId>
+            <version>0.9.1.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
