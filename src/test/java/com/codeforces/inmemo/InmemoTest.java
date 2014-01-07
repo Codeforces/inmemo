@@ -73,7 +73,7 @@ public class InmemoTest {
 
         // Create table.
         {
-            Inmemo.createTable(User.class, "ID", new Indices.Builder<User>() {{
+            Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
                 add(new Index<>("ID", Long.class, new IndexGetter<User, Long>() {
                     @Override
                     public Long get(final User tableItem) {
@@ -87,14 +87,12 @@ public class InmemoTest {
                         return tableItem.getHandle().substring(0, 1);
                     }
                 }));
-            }}.build());
+            }}.build(), true);
         }
 
-        // Wait to preload.
+        // Assert size.
         {
-            while (!Inmemo.isPreloaded()) {
-                Thread.sleep(10L);
-            }
+            Assert.assertEquals(USER_COUNT, Inmemo.size(User.class));
         }
 
         // Exactly one user with id=123.
@@ -157,7 +155,7 @@ public class InmemoTest {
                 }
             });
 
-            Assert.assertTrue(USER_COUNT / 26 / 26 / 2 <= xyUsers && xyUsers <= USER_COUNT / 26 / 26 * 2);
+            Assert.assertTrue(USER_COUNT / 26 / 26 / 3 <= xyUsers && xyUsers <= USER_COUNT / 26 / 26 * 3);
         }
 
         // Tests that if we change user state in memory, it will no affect table unless we use insertOrUpdate.
@@ -200,7 +198,7 @@ public class InmemoTest {
 
         // Create table.
         {
-            Inmemo.createTable(User.class, "ID", new Indices.Builder<User>() {{
+            Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
                 add(new Index<>("ID", Long.class, new IndexGetter<User, Long>() {
                     @Override
                     public Long get(final User tableItem) {
@@ -214,14 +212,7 @@ public class InmemoTest {
                         return tableItem.getHandle().substring(0, 1);
                     }
                 }));
-            }}.build());
-        }
-
-        // Wait to preload.
-        {
-            while (!Inmemo.isPreloaded()) {
-                Thread.sleep(10L);
-            }
+            }}.build(), true);
         }
 
 //        Assert.assertEquals(1, Inmemo.findCount(User2.class, new IndexConstraint<Object>("ID", 11), new Matcher<User2>() {
@@ -259,7 +250,6 @@ public class InmemoTest {
             }).size());
 
             userDao.insertRandom();
-
             Thread.sleep(500);
 
             Assert.assertEquals(1, Inmemo.find(Wrapper.a.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<Wrapper.a>() {

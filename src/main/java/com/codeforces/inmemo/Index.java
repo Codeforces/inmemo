@@ -98,6 +98,45 @@ public class Index<T extends HasId, V> {
         }
     }
 
+    private T internalFindOnly(boolean throwOnNotUnique, V value, Matcher<T> matcher) {
+        if (value != null && value.getClass() != indexClass) {
+            logger.info("Value of " + value.getClass() + " is invalid for index '"
+                    + table.getClazz().getName() + '#' + name + "'.");
+        }
+
+        final Object wrappedValue = wrapValue(value);
+        final Map<Long, T> valueMap = map.get(wrappedValue);
+
+        if (valueMap == null || valueMap.isEmpty()) {
+            return null;
+        } else {
+            final List<T> result = new ArrayList<>(2);
+
+            final Lock lock = locks.get(wrappedValue);
+            lock.lock();
+            try {
+                for (final T tableItem : valueMap.values()) {
+                    if (matcher.match(tableItem)) {
+                        result.add(tableItem);
+                        if (!throwOnNotUnique) {
+                            break;
+                        } else {
+                            if (result.size() >= 2) {
+                                throw new InmemoException("Expected at most one item of " + table.getClazz()
+                                        + " matching index " + getName()
+                                        + " with value=" + value + ".");
+                            }
+                        }
+                    }
+                }
+            } finally {
+                lock.unlock();
+            }
+
+            return result.isEmpty() ? null : result.get(0);
+        }
+    }
+
     long internalFindCount(final V value, final Matcher<T> matcher) {
         final Object wrappedValue = wrapValue(value);
         final Map<Long, T> valueMap = map.get(wrappedValue);
@@ -132,6 +171,11 @@ public class Index<T extends HasId, V> {
     @SuppressWarnings("unchecked")
     List<T> find(final Object value, final Matcher<T> predicate) {
         return internalFind((V) value, predicate);
+    }
+
+    @SuppressWarnings("unchecked")
+    public T findOnly(final boolean throwOnNotUnique, final Object value, final Matcher<T> predicate) {
+        return internalFindOnly(throwOnNotUnique, (V) value, predicate);
     }
 
     @SuppressWarnings("unchecked")

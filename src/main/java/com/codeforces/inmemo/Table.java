@@ -1,6 +1,9 @@
 package com.codeforces.inmemo;
 
-import net.sf.cglib.beans.BeanCopier;
+import gnu.trove.set.TLongSet;
+import gnu.trove.set.hash.TLongHashSet;
+import org.jacuzzi.core.Row;
+import org.springframework.beans.BeanUtils;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -12,21 +15,34 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class Table<T extends HasId> {
     private final Lock lock = new ReentrantLock();
+
     private final Map<String, Index<T, ?>> indices = new ConcurrentHashMap<>();
+    private final List<RowListener> rowListeners = new ArrayList<>();
+    private final List<ItemListener<T>> itemListeners = new ArrayList<>();
+
     private final Class<T> clazz;
     private final String clazzSpec;
     private final String indicatorField;
+    private final String databaseIndex;
     private TableUpdater<T> tableUpdater;
     private volatile boolean preloaded;
+    private final TLongSet ids = new TLongHashSet();
 
     Table(final Class<T> clazz, final String indicatorField) {
         this.clazz = clazz;
-        this.indicatorField = indicatorField;
+        if (indicatorField.contains("@")) {
+            String[] tokens = indicatorField.split("@");
+            this.indicatorField = tokens[0];
+            this.databaseIndex = tokens[1];
+        } else {
+            this.indicatorField = indicatorField;
+            this.databaseIndex = null;
+        }
         clazzSpec = ReflectionUtil.getTableClassSpec(clazz);
     }
 
-    public void createUpdater() {
-        tableUpdater = new TableUpdater<>(this);
+    public void createUpdater(Object initialIndicatorValue) {
+        tableUpdater = new TableUpdater<>(this, initialIndicatorValue);
     }
 
     void runUpdater() {
@@ -39,6 +55,10 @@ public class Table<T extends HasId> {
 
     String getIndicatorField() {
         return indicatorField;
+    }
+
+    String getDatabaseIndex() {
+        return databaseIndex;
     }
 
     String getClazzSpec() {
@@ -65,13 +85,11 @@ public class Table<T extends HasId> {
         } else {
             final String otherClassSpec = ReflectionUtil.getTableClassSpec(otherClass);
             if (clazzSpec.equals(otherClassSpec)) {
-                final BeanCopier beanCopier = BeanCopier.create(clazz, otherClass, false);
-
                 return new Matcher<T>() {
                     @Override
                     public boolean match(final T tableItem) {
                         final U otherItem = ReflectionUtil.newInstance(otherClass);
-                        beanCopier.copy(tableItem, otherItem, null);
+                        BeanUtils.copyProperties(tableItem, otherItem);
                         return otherMatcher.match(otherItem);
                     }
                 };
@@ -87,15 +105,30 @@ public class Table<T extends HasId> {
         index.setTable(this);
     }
 
+    void add(final RowListener rowListener) {
+        rowListeners.add(rowListener);
+    }
+
+    void add(final ItemListener<T> itemListener) {
+        itemListeners.add(itemListener);
+    }
+
+    boolean hasInsertOrUpdateByItem() {
+        return !itemListeners.isEmpty() || !indices.isEmpty();
+    }
+
+    boolean hasInsertOrUpdateByRow() {
+        return !rowListeners.isEmpty();
+    }
+
     @SuppressWarnings("unchecked")
     <U extends HasId> void insertOrUpdate(final U item) {
         final Class<?> itemClass = item.getClass();
         final String itemClassSpec = ReflectionUtil.getTableClassSpec(itemClass);
 
         if (clazzSpec.equals(itemClassSpec)) {
-            final BeanCopier beanCopier = BeanCopier.create(itemClass, clazz, false);
             final T tableItem = ReflectionUtil.newInstance(clazz);
-            beanCopier.copy(item, tableItem, null);
+            BeanUtils.copyProperties(item, tableItem);
             internalInsertOrUpdate(tableItem);
         } else {
             throw new InmemoException("Table class is incompatible with the class of object [tableClass=" + clazz
@@ -103,11 +136,30 @@ public class Table<T extends HasId> {
         }
     }
 
+    void insertOrUpdate(final Row row) {
+        for (RowListener rowListener : rowListeners) {
+            rowListener.insertOrUpdate(row);
+        }
+    }
+
+    int size() {
+        lock.lock();
+        try {
+            return ids.size();
+        } finally {
+            lock.unlock();
+        }
+    }
+
     private void internalInsertOrUpdate(final T item) {
         lock.lock();
         try {
+            ids.add(item.getId());
             for (final Index<T, ?> index : indices.values()) {
                 index.insertOrUpdate(item);
+            }
+            for (final ItemListener<T> itemListener : itemListeners) {
+                itemListener.insertOrUpdate(item);
             }
         } finally {
             lock.unlock();
@@ -126,6 +178,20 @@ public class Table<T extends HasId> {
         }
 
         return index.find(indexConstraint.getValue(), predicate);
+    }
+
+    public T findOnly(final boolean throwOnNotUnique, final IndexConstraint<?> indexConstraint, final Matcher<T> predicate) {
+        if (indexConstraint == null) {
+            throw new InmemoException("Nonnul IndexConstraint is required [tableClass="
+                    + ReflectionUtil.getTableClassName(clazz) + "].");
+        }
+
+        final Index<T, ?> index = indices.get(indexConstraint.getIndexName());
+        if (index == null) {
+            throw new IllegalArgumentException("Unexpected index name `" + indexConstraint.getIndexName() + "`.");
+        }
+
+        return index.findOnly(throwOnNotUnique, indexConstraint.getValue(), predicate);
     }
 
     long findCount(final IndexConstraint<?> indexConstraint, final Matcher<T> predicate) {

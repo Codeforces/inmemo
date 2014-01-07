@@ -2,16 +2,10 @@ package com.codeforces.inmemo.dao.impl;
 
 import com.codeforces.inmemo.dao.UserDao;
 import com.codeforces.inmemo.model.User;
-import com.codeforces.inmemo.model.User2;
-import net.sf.cglib.beans.BeanCopier;
 import org.jacuzzi.core.GenericDaoImpl;
-import org.jacuzzi.core.Row;
-import org.jacuzzi.core.TypeOracle;
 
 import javax.sql.DataSource;
-import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
 import java.util.Random;
 
 /**

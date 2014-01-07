@@ -19,7 +19,7 @@ class TableUpdater<T extends HasId> {
     private static DataSource dataSource;
     private static final Collection<TableUpdater<? extends HasId>> instances = new ArrayList<>();
 
-    private final Table<T> table;
+    private final Table table;
     private final Thread thread;
     private final String threadName;
     private volatile boolean running;
@@ -27,20 +27,23 @@ class TableUpdater<T extends HasId> {
     private final Jacuzzi jacuzzi;
     private final TypeOracle<T> typeOracle;
 
-    private Object indicatorLastValue;
+    private Object lastIndicatorValue;
 
-    /** Delay after meaningless update try. */
-    private static final long rescanTimeMillis = 1000;
+    /**
+     * Delay after meaningless update try.
+     */
+    private static final long rescanTimeMillis = 500;
 
     private final Collection<Long> lastUpdatedEntityIds = new HashSet<>();
 
-    TableUpdater(final Table<T> table) {
+    TableUpdater(final Table<T> table, Object initialIndicatorValue) {
         if (dataSource == null) {
             logger.error("It should be called static Inmemo#setDataSource() before any instance of TableUpdater.");
             throw new InmemoException("It should be called static Inmemo#setDataSource() before any instance of TableUpdater.");
         }
 
         this.table = table;
+        this.lastIndicatorValue = initialIndicatorValue;
 
         jacuzzi = Jacuzzi.getJacuzzi(dataSource);
         typeOracle = TypeOracle.getTypeOracle(table.getClazz());
@@ -73,45 +76,67 @@ class TableUpdater<T extends HasId> {
     }
 
     private void update() {
-        final List<Row> rows = getRecentlyChangedRows(indicatorLastValue);
+        long startTimeMillis = System.currentTimeMillis();
+
+        final List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
 
         if (rows.size() >= 10) {
-            logger.info(String.format("Thread '%s' has found %s rows to update.", threadName, rows.size()));
+            logger.info(String.format("Thread '%s' has found %s rows to update in %d ms.", threadName,
+                    rows.size(), System.currentTimeMillis() - startTimeMillis));
         }
 
         int updatedCount = 0;
-        final Object previousIndicatorLastValue = indicatorLastValue;
+        final Object previousIndicatorLastValue = lastIndicatorValue;
+
+        final boolean hasInsertOrUpdateByItem = table.hasInsertOrUpdateByItem();
+        final boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
 
         for (final Row row : rows) {
-            final T entity = typeOracle.convertFromRow(row);
+            long id = getRowId(row);
             if (ObjectUtils.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
-                    && lastUpdatedEntityIds.contains(entity.getId())) {
+                    && lastUpdatedEntityIds.contains(id)) {
                 continue;
             }
 
-            table.insertOrUpdate(entity);
+            if (hasInsertOrUpdateByItem) {
+                final T entity = typeOracle.convertFromRow(row);
+                table.insertOrUpdate(entity);
+            }
+
+            if (hasInsertOrUpdateByRow) {
+                table.insertOrUpdate(row);
+            }
+
             // logger.log(Level.INFO, "Updated entity " + entity + '.');
-            indicatorLastValue = row.get(table.getIndicatorField());
+            lastIndicatorValue = row.get(table.getIndicatorField());
             ++updatedCount;
         }
 
         if (updatedCount > 0) {
-            logger.info(String.format("Thread '%s' has updated %d items.", threadName, updatedCount));
+            logger.info(String.format("Thread '%s' has updated %d items in %d ms.",
+                    threadName, updatedCount, System.currentTimeMillis() - startTimeMillis));
         }
 
-        lastUpdatedEntityIds.clear();
-
-        for (final Row row : rows) {
-            if (ObjectUtils.equals(row.get(table.getIndicatorField()), indicatorLastValue)) {
-                lastUpdatedEntityIds.add((Long) row.get("id"));
-            }
-        }
-
-        if (rows.size() < MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
+        if (rows.size() <= lastUpdatedEntityIds.size()) {
             table.setPreloaded(true);
         }
 
+        lastUpdatedEntityIds.clear();
+        for (final Row row : rows) {
+            if (ObjectUtils.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
+                lastUpdatedEntityIds.add(getRowId(row));
+            }
+        }
+
         sleepBetweenRescans(updatedCount);
+    }
+
+    private long getRowId(Row row) {
+        Long id = (Long) row.get("id");
+        if (id == null) {
+            id = (Long) row.get("ID");
+        }
+        return id;
     }
 
     private void sleepBetweenRescans(final int updatedCount) {
@@ -138,12 +163,14 @@ class TableUpdater<T extends HasId> {
     private List<Row> getRecentlyChangedRows(final Object indicatorLastValue) {
         final List<Row> rows;
         final long startTimeMillis = System.currentTimeMillis();
+        final String forceIndexClause = table.getDatabaseIndex() == null ? "" : ("FORCE INDEX (" + table.getDatabaseIndex() + ")");
 
         if (indicatorLastValue == null) {
             rows = jacuzzi.findRows(
                     String.format(
-                            "SELECT * FROM %s ORDER BY %s, %s LIMIT %d",
+                            "SELECT * FROM %s %s ORDER BY %s, %s LIMIT %d",
                             typeOracle.getTableName(),
+                            forceIndexClause,
                             table.getIndicatorField(),
                             typeOracle.getIdColumn(),
                             MAX_ROWS_IN_SINGLE_SQL_STATEMENT
@@ -152,8 +179,9 @@ class TableUpdater<T extends HasId> {
         } else {
             rows = jacuzzi.findRows(
                     String.format(
-                            "SELECT * FROM %s WHERE %s >= ? ORDER BY %s, %s LIMIT %d",
+                            "SELECT * FROM %s %s WHERE %s >= ? ORDER BY %s, %s LIMIT %d",
                             typeOracle.getTableName(),
+                            forceIndexClause,
                             table.getIndicatorField(),
                             table.getIndicatorField(),
                             typeOracle.getIdColumn(),

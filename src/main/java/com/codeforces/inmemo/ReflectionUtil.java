@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentMap;
  */
 final class ReflectionUtil {
     private static final ConcurrentMap<Class<?>, FastClass> fastClasses = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<Class<?>, String> tableClassNamesCache = new ConcurrentHashMap<>();
 
     private ReflectionUtil() {
         // No operations.
@@ -54,13 +55,19 @@ final class ReflectionUtil {
     }
 
     public static String getTableClassName(final Class<?> clazz) {
+        String cachedResult = tableClassNamesCache.get(clazz);
+        if (cachedResult != null) {
+            return cachedResult;
+        }
+
         Class<?> currentClass = clazz;
 
         while (currentClass != null) {
             final String currentClassName = currentClass.getName();
             if (currentClassName.contains("$")) {
-                currentClass = clazz.getSuperclass();
+                currentClass = currentClass.getSuperclass();
             } else {
+                tableClassNamesCache.putIfAbsent(clazz, currentClassName);
                 return currentClassName;
             }
         }
