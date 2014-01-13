@@ -2,6 +2,7 @@ package com.codeforces.inmemo;
 
 import org.apache.log4j.Logger;
 
+import javax.annotation.Nonnull;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -20,22 +21,53 @@ public class Index<T extends HasId, V> {
     private final IndexGetter<T, V> indexGetter;
 
     // Actually, it has type ConcurrentMap<V, Map<Long, T>> but can't be used because of non-null keys in ConcurrentHashMap.
-    private final ConcurrentMap<Object, Map<Long, T>> map = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Object, Map<Long, T>> map;
+
+    // Actually, it has type ConcurrentMap<V, >> but can't be used because of non-null keys in ConcurrentHashMap.
+    private final ConcurrentMap<Object, T> uniqueMap;
 
     // Actually, it has type ConcurrentMap<V, Lock> but can't be used because of non-null keys in ConcurrentHashMap.
-    private final ConcurrentMap<Object, Lock> locks = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Object, Lock> locks;
+
+    // {@code true} iff each index value corresponds to at most one item.
+    private final boolean unique;
 
     private Table<T> table;
 
     private final Class<?> indexClass;
 
-    public Index(
+    private Index(
             final String name,
-            @SuppressWarnings("UnusedParameters") final Class<V> indexClass,
-            final IndexGetter<T, V> indexGetter) {
+            final Class<V> indexClass,
+            final IndexGetter<T, V> indexGetter,
+            boolean unique) {
         this.name = name;
         this.indexClass = indexClass;
         this.indexGetter = indexGetter;
+        this.unique = unique;
+
+        locks = new ConcurrentHashMap<>();
+        if (unique) {
+            uniqueMap = new ConcurrentHashMap<>();
+            map = null;
+        } else {
+            uniqueMap = null;
+            map = new ConcurrentHashMap<>();
+        }
+    }
+
+    @SuppressWarnings("UnusedDeclaration")
+    public static <T extends HasId, V> Index<T, V> create(final String name,
+                                                          final Class<V> indexClass,
+                                                          final IndexGetter<T, V> indexGetter) {
+        return new Index<>(name, indexClass, indexGetter, false);
+    }
+
+    @SuppressWarnings("UnusedDeclaration")
+    public static <T extends HasId, V> Index<T, V> createUnique(final String name,
+                                                                final Class<V> indexClass,
+                                                                final IndexGetter<T, V> indexGetter) {
+        return new Index<>(name, indexClass, indexGetter, true);
     }
 
     void setTable(final Table<T> table) {
@@ -46,7 +78,7 @@ public class Index<T extends HasId, V> {
         return value == null ? NULL : value;
     }
 
-    void insertOrUpdate(final T tableItem) {
+    void insertOrUpdate(@Nonnull final T tableItem) {
         final Object value = wrapValue(indexGetter.get(tableItem));
 
         if (value != NULL && value.getClass() != indexClass) {
@@ -54,27 +86,56 @@ public class Index<T extends HasId, V> {
                     + table.getClazz().getName() + '#' + name + "'.");
         }
 
-        if (!map.containsKey(value) || !locks.containsKey(value)) {
-            map.putIfAbsent(value, new ConcurrentHashMap<Long, T>());
+        if (unique) {
             locks.putIfAbsent(value, new ReentrantLock());
-        }
+            final Lock lock = locks.get(value);
+            lock.lock();
+            try {
+                final T previousTableItem = uniqueMap.get(value);
+                if (previousTableItem != null
+                        && previousTableItem.getId() != tableItem.getId()) {
+                    throw new InmemoException("Index `" + getName()
+                            + "` expected to be unique but it has multiple items for value="
+                            + value + " [previousTableItem=" + previousTableItem + ", newTableItem=" + tableItem + "].");
+                }
 
-        final Lock lock = locks.get(value);
-        lock.lock();
-        try {
-            map.get(value).put(tableItem.getId(), tableItem);
-        } finally {
-            lock.unlock();
+                uniqueMap.put(value, tableItem);
+            } finally {
+                lock.unlock();
+            }
+        } else {
+            if (!map.containsKey(value) || !locks.containsKey(value)) {
+                map.putIfAbsent(value, new ConcurrentHashMap<Long, T>());
+                locks.putIfAbsent(value, new ReentrantLock());
+            }
+
+            final Lock lock = locks.get(value);
+            lock.lock();
+            try {
+                map.get(value).put(tableItem.getId(), tableItem);
+            } finally {
+                lock.unlock();
+            }
         }
     }
 
     List<T> internalFind(final V value, final Matcher<T> matcher) {
+        if (unique) {
+            final T tableItem = internalFindOnly(true, value, matcher);
+            if (tableItem == null) {
+                return Collections.emptyList();
+            } else {
+                return Arrays.asList(tableItem);
+            }
+        }
+
         if (value != null && value.getClass() != indexClass) {
             logger.info("Value of " + value.getClass() + " is invalid for index '"
                     + table.getClazz().getName() + '#' + name + "'.");
         }
 
         final Object wrappedValue = wrapValue(value);
+
         final Map<Long, T> valueMap = map.get(wrappedValue);
 
         if (valueMap == null || valueMap.isEmpty()) {
@@ -105,62 +166,94 @@ public class Index<T extends HasId, V> {
         }
 
         final Object wrappedValue = wrapValue(value);
-        final Map<Long, T> valueMap = map.get(wrappedValue);
 
-        if (valueMap == null || valueMap.isEmpty()) {
-            return null;
-        } else {
-            final List<T> result = new ArrayList<>(2);
-
+        if (unique) {
+            locks.putIfAbsent(wrappedValue, new ReentrantLock());
             final Lock lock = locks.get(wrappedValue);
             lock.lock();
             try {
-                for (final T tableItem : valueMap.values()) {
-                    if (matcher.match(tableItem)) {
-                        result.add(tableItem);
-                        if (!throwOnNotUnique) {
-                            break;
-                        } else {
-                            if (result.size() >= 2) {
-                                throw new InmemoException("Expected at most one item of " + table.getClazz()
-                                        + " matching index " + getName()
-                                        + " with value=" + value + ".");
-                            }
-                        }
-                    }
+                final T tableItem = uniqueMap.get(wrappedValue);
+
+                if (tableItem == null || !matcher.match(tableItem)) {
+                    return null;
+                } else {
+                    return tableItem;
                 }
             } finally {
                 lock.unlock();
             }
+        } else {
+            final Map<Long, T> valueMap = map.get(wrappedValue);
 
-            return result.isEmpty() ? null : result.get(0);
+            if (valueMap == null || valueMap.isEmpty()) {
+                return null;
+            } else {
+                final List<T> result = new ArrayList<>(2);
+
+                final Lock lock = locks.get(wrappedValue);
+                lock.lock();
+                try {
+                    for (final T tableItem : valueMap.values()) {
+                        if (matcher.match(tableItem)) {
+                            result.add(tableItem);
+                            if (!throwOnNotUnique) {
+                                break;
+                            } else {
+                                if (result.size() >= 2) {
+                                    throw new InmemoException("Expected at most one item of " + table.getClazz()
+                                            + " matching index " + getName()
+                                            + " with value=" + value + ".");
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    lock.unlock();
+                }
+
+                return result.isEmpty() ? null : result.get(0);
+            }
         }
     }
 
     long internalFindCount(final V value, final Matcher<T> matcher) {
         final Object wrappedValue = wrapValue(value);
-        final Map<Long, T> valueMap = map.get(wrappedValue);
 
-        if (valueMap == null || valueMap.isEmpty()) {
-            return 0;
-        } else {
-            //noinspection TooBroadScope
-            long result = 0;
-
+        if (unique) {
+            locks.putIfAbsent(wrappedValue, new ReentrantLock());
             final Lock lock = locks.get(wrappedValue);
             lock.lock();
-
+            T tableItem;
             try {
-                for (final T tableItem : valueMap.values()) {
-                    if (matcher.match(tableItem)) {
-                        result++;
-                    }
-                }
+                tableItem = uniqueMap.get(wrappedValue);
             } finally {
                 lock.unlock();
             }
+            return (tableItem == null || !matcher.match(tableItem)) ? 0 : 1;
+        } else {
+            final Map<Long, T> valueMap = map.get(wrappedValue);
 
-            return result;
+            if (valueMap == null || valueMap.isEmpty()) {
+                return 0;
+            } else {
+                //noinspection TooBroadScope
+                long result = 0;
+
+                final Lock lock = locks.get(wrappedValue);
+                lock.lock();
+
+                try {
+                    for (final T tableItem : valueMap.values()) {
+                        if (matcher.match(tableItem)) {
+                            result++;
+                        }
+                    }
+                } finally {
+                    lock.unlock();
+                }
+
+                return result;
+            }
         }
     }
 

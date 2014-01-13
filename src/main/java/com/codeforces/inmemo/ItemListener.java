@@ -14,7 +14,7 @@ public class ItemListener<T extends HasId> {
         this.listener = listener;
     }
 
-    public void insertOrUpdate(final T item) {
+    public void insertOrUpdate(@Nonnull final T item) {
         listener.onInsertOrUpdate(item);
     }
 

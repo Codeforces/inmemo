@@ -5,6 +5,7 @@ import gnu.trove.set.hash.TLongHashSet;
 import org.jacuzzi.core.Row;
 import org.springframework.beans.BeanUtils;
 
+import javax.annotation.Nonnull;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
@@ -122,7 +123,7 @@ public class Table<T extends HasId> {
     }
 
     @SuppressWarnings("unchecked")
-    <U extends HasId> void insertOrUpdate(final U item) {
+    <U extends HasId> void insertOrUpdate(@Nonnull final U item) {
         final Class<?> itemClass = item.getClass();
         final String itemClassSpec = ReflectionUtil.getTableClassSpec(itemClass);
 
@@ -151,7 +152,7 @@ public class Table<T extends HasId> {
         }
     }
 
-    private void internalInsertOrUpdate(final T item) {
+    private void internalInsertOrUpdate(@Nonnull final T item) {
         lock.lock();
         try {
             ids.add(item.getId());

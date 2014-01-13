@@ -229,6 +229,19 @@ public final class Inmemo {
     /**
      * @param clazz           Table item class.
      * @param indexConstraint Index to use in search, index value.
+     * @param <T>             Items class.
+     * @return List of _copies_ of satisfying indexConstraint items.
+     */
+    @SuppressWarnings("UnusedDeclaration")
+    public static <T extends HasId> List<T> find(
+            @Nonnull final Class<T> clazz,
+            @Nonnull final IndexConstraint<?> indexConstraint) {
+        return find(clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
+    }
+
+    /**
+     * @param clazz           Table item class.
+     * @param indexConstraint Index to use in search, index value.
      * @param matcher         Predicate to choose items.
      * @param <T>             Items class.
      * @return List of _copies_ of matched items.
@@ -271,6 +284,7 @@ public final class Inmemo {
             }
 
             if (false && sameClass) {
+                //This case does not work with multiple classloaders.
                 BeanCopier beanCopier = getBeanCopier(clazz, clazz);
                 final List<T> tableClassResult = new ArrayList<>(result.size());
 
@@ -293,6 +307,21 @@ public final class Inmemo {
                 return Collections.unmodifiableList(tableClassResult);
             }
         }
+    }
+
+    /**
+     * @param throwOnNotUnique Throw exception if resulting item is not unique.
+     * @param clazz            Table item class.
+     * @param indexConstraint  Index to use in search, index value.
+     * @param <T>              Items class.
+     * @return List of _copies_ of satisfying indexConstraint items.
+     */
+    @SuppressWarnings("UnusedDeclaration")
+    public static <T extends HasId> T findOnly(
+            final boolean throwOnNotUnique,
+            @Nonnull final Class<T> clazz,
+            @Nonnull final IndexConstraint<?> indexConstraint) {
+        return findOnly(throwOnNotUnique, clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
     }
 
     /**
@@ -332,6 +361,7 @@ public final class Inmemo {
         }
 
         if (false && result.getClass() == clazz) {
+            //This case does not work with multiple classloaders.
             final T item = ReflectionUtil.newInstance(clazz);
             getBeanCopier(clazz, clazz).copy(result, item, null);
             return item;
@@ -340,6 +370,19 @@ public final class Inmemo {
             BeanUtils.copyProperties(result, item);
             return item;
         }
+    }
+
+    /**
+     * @param clazz           Table item class.
+     * @param indexConstraint Index to use in search, index value.
+     * @param <T>             Items class.
+     * @return Number of satisfying indexConstraint items.
+     */
+    @SuppressWarnings("UnusedDeclaration")
+    public static <T extends HasId> long findCount(
+            @Nonnull final Class<T> clazz,
+            @Nonnull final IndexConstraint<?> indexConstraint) {
+        return findCount(clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
     }
 
     /**

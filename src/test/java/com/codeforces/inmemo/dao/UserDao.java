@@ -11,4 +11,5 @@ public interface UserDao {
     User find(long id);
     void insertRandom();
     List<User> findAll();
+    User newRandomUser();
 }

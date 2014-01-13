@@ -25,6 +25,11 @@ public class UserDaoImpl extends GenericDaoImpl<User, Long> implements UserDao {
 
     @Override
     public void insertRandom() {
+        insert(newRandomUser());
+    }
+
+    @Override
+    public User newRandomUser() {
         User user = new User();
         user.setHandle(getRandomString());
         user.setEmail(getRandomString() + "@gmail.com");
@@ -34,7 +39,7 @@ public class UserDaoImpl extends GenericDaoImpl<User, Long> implements UserDao {
         user.setLastOnlineTime(new Date(new Date().getTime() + random.nextInt(1000000)));
         user.setDisabled(random.nextBoolean());
         user.setAdmin(random.nextBoolean());
-        insert(user);
+        return user;
     }
 
     private String getRandomString() {

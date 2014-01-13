@@ -13,6 +13,8 @@ import org.junit.Test;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 
 import static org.hamcrest.core.Is.is;
@@ -74,14 +76,21 @@ public class InmemoTest {
         // Create table.
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                add(new Index<>("ID", Long.class, new IndexGetter<User, Long>() {
+                add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
                     @Override
                     public Long get(final User tableItem) {
                         return tableItem.getId();
                     }
                 }));
 
-                add(new Index<>("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
+                add(Index.create("handle", String.class, new IndexGetter<User, String>() {
+                    @Override
+                    public String get(final User user) {
+                        return user.getHandle();
+                    }
+                }));
+
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
                     @Override
                     public String get(final User tableItem) {
                         return tableItem.getHandle().substring(0, 1);
@@ -185,6 +194,47 @@ public class InmemoTest {
                 }
             }).get(0).getHandle()));
         }
+
+        // Tests that findOnly throws exception if non-unique and throwOnNotUnique parameter is true;
+        {
+            boolean hasException = false;
+            User existingUser = null;
+            try {
+                existingUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", USER_COUNT / 5));
+            } catch (InmemoException e) {
+                hasException = true;
+            }
+            Assert.assertFalse(hasException);
+
+            User user = userDao.newRandomUser();
+            user.setHandle(existingUser.getHandle());
+            Inmemo.insertOrUpdate(user);
+
+            List<User> possibleUsers = Arrays.asList(existingUser, user);
+
+            hasException = false;
+            try {
+                User foundUser = Inmemo.findOnly(false, User.class, new IndexConstraint<>("handle", user.getHandle()));
+                Assert.assertNotNull(foundUser);
+                Assert.assertTrue(possibleUsers.contains(foundUser));
+            } catch (InmemoException e) {
+                hasException = e.getMessage().toLowerCase().contains("unique");
+            }
+
+            Assert.assertFalse(hasException);
+
+            hasException = false;
+            try {
+                User foundUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("handle", user.getHandle()));
+                Assert.assertNotNull(foundUser);
+                Assert.assertTrue(possibleUsers.contains(foundUser));
+            } catch (InmemoException e) {
+                hasException = true;
+            }
+
+            Assert.assertTrue(hasException);
+
+        }
     }
 
     @Test
@@ -199,14 +249,14 @@ public class InmemoTest {
         // Create table.
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                add(new Index<>("ID", Long.class, new IndexGetter<User, Long>() {
+                add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
                     @Override
                     public Long get(final User tableItem) {
                         return tableItem.getId();
                     }
                 }));
 
-                add(new Index<>("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
                     @Override
                     public String get(final User tableItem) {
                         return tableItem.getHandle().substring(0, 1);
@@ -287,6 +337,118 @@ public class InmemoTest {
                     return user.getPassword() == null;
                 }
             }).size());
+        }
+    }
+
+    @Test
+    public void testUnique() throws InterruptedException {
+        Inmemo.dropTableIfExists(User.class);
+
+        // Test user count.
+        {
+            Assert.assertEquals(USER_COUNT, userDao.findAll().size());
+        }
+
+        // Create table.
+        {
+            Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
+                add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
+                    @Override
+                    public Long get(final User user) {
+                        return user.getId();
+                    }
+                }));
+                add(Index.createUnique("handle", String.class, new IndexGetter<User, String>() {
+                    @Override
+                    public String get(final User user) {
+                        return user.getHandle();
+                    }
+                }));
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
+                    @Override
+                    public String get(final User tableItem) {
+                        return tableItem.getHandle().substring(0, 1);
+                    }
+                }));
+            }}.build(), true);
+        }
+
+        // Assert size.
+        {
+            Assert.assertEquals(USER_COUNT, Inmemo.size(User.class));
+        }
+
+        // Exactly one user with id=123.
+        {
+            Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), new Matcher<User>() {
+                @Override
+                public boolean match(final User user) {
+                    return true;
+                }
+            }).size());
+        }
+
+        // No one user with id=123 and false matcher.
+        {
+            Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), new Matcher<User>() {
+                @Override
+                public boolean match(final User user) {
+                    return false;
+                }
+            }).size());
+        }
+
+        // Exactly one user with id=123.
+        {
+            Assert.assertEquals(1, Inmemo.findCount(User.class, new IndexConstraint<>("ID", 123L)));
+        }
+
+        // Exactly one user with id=123.
+        {
+            Assert.assertEquals(123L, Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", 123L)).getId());
+        }
+
+        // Tests that there is no user[id=USER_COUNT + 1], inserts it, waits, tests that the table contains it.
+        {
+            Assert.assertNull(Inmemo.findOnly(false, User.class, new IndexConstraint<>("ID", USER_COUNT + 1)));
+
+            userDao.insertRandom();
+            Thread.sleep(500);
+
+            Assert.assertEquals(USER_COUNT + 1, Inmemo.findOnly(false, User.class, new IndexConstraint<>("ID", USER_COUNT + 1)).getId());
+        }
+
+        // Tests using second index that the number of users with first letter 'e' in handle is expected.
+        {
+            long id = USER_COUNT / 2;
+
+            User userById = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id));
+            Assert.assertEquals(id, userById.getId());
+
+            User userByHandle = Inmemo.findOnly(true, User.class, new IndexConstraint<>("handle", userById.getHandle()));
+
+            Assert.assertNotNull(userByHandle);
+            Assert.assertNotSame(userById, userByHandle);
+            Assert.assertEquals(userById, userByHandle);
+
+            List<User> usersByFirstHandleLetter = Inmemo.find(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER", userById.getHandle().substring(0, 1)));
+            Assert.assertTrue(usersByFirstHandleLetter.contains(userById));
+        }
+
+        // Tests that if non-unique then throw exception.
+        {
+            User existingUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", USER_COUNT / 5));
+            User user = userDao.newRandomUser();
+            user.setHandle(existingUser.getHandle());
+
+            boolean hasException = false;
+            try {
+                Inmemo.insertOrUpdate(user);
+            } catch (InmemoException e) {
+                hasException = e.getMessage().toLowerCase().contains("unique");
+            }
+
+            Assert.assertTrue(hasException);
         }
     }
 }
