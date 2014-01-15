@@ -112,7 +112,7 @@ class TableUpdater<T extends HasId> {
             ++updatedCount;
         }
 
-        if (updatedCount > 0) {
+        if (updatedCount >= 10) {
             logger.info(String.format("Thread '%s' has updated %d items in %d ms.",
                     threadName, updatedCount, System.currentTimeMillis() - startTimeMillis));
         }
