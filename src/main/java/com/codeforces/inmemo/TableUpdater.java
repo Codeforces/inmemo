@@ -28,6 +28,7 @@ class TableUpdater<T extends HasId> {
     private final TypeOracle<T> typeOracle;
 
     private Object lastIndicatorValue;
+    private final long startTimeMillis;
 
     /**
      * Delay after meaningless update try.
@@ -53,6 +54,7 @@ class TableUpdater<T extends HasId> {
         thread.setDaemon(true);
 
         logger.info("Started Inmemo table updater thread '" + threadName + "'.");
+        startTimeMillis = System.currentTimeMillis();
 
         //noinspection ThisEscapedInObjectConstruction
         instances.add(this);
@@ -117,7 +119,11 @@ class TableUpdater<T extends HasId> {
                     threadName, updatedCount, System.currentTimeMillis() - startTimeMillis));
         }
 
-        if (rows.size() <= lastUpdatedEntityIds.size()) {
+        if (rows.size() <= lastUpdatedEntityIds.size()
+                && rows.size() < MAX_ROWS_IN_SINGLE_SQL_STATEMENT / 2
+                && !table.isPreloaded()) {
+            logger.info("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
+                    + " [items=" + table.size() + "] in " + (System.currentTimeMillis() - TableUpdater.this.startTimeMillis) + " ms.");
             table.setPreloaded(true);
         }
 

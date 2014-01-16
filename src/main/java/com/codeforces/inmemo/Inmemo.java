@@ -115,7 +115,7 @@ public final class Inmemo {
                             break;
                         }
                     }
-                    logger.info("Inmemo preloaded " + tableClassName + ".");
+                    logger.info("Inmemo completed to wait for preload " + tableClassName + ".");
                 }
             } else {
                 // Exactly the same class?
@@ -142,7 +142,7 @@ public final class Inmemo {
                             break;
                         }
                     }
-                    logger.info("Inmemo preloaded " + tableClassName + ".");
+                    logger.info("Inmemo completed to wait for preload " + tableClassName + ".");
                 }
             }
         } finally {
@@ -197,7 +197,7 @@ public final class Inmemo {
                 }
             }
             if (preloadedNow) {
-                logger.info("Inmemo preloaded " + tableClassName + ".");
+                logger.info("Inmemo completed to wait for preload " + tableClassName + ".");
             }
         } else {
             throw new InmemoException("Unable to find table for class name `" + tableClassName + "`.");
