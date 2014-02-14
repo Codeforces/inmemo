@@ -90,7 +90,6 @@ class TableUpdater<T extends HasId> {
         int updatedCount = 0;
         final Object previousIndicatorLastValue = lastIndicatorValue;
 
-        final boolean hasInsertOrUpdateByItem = table.hasInsertOrUpdateByItem();
         final boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
 
         for (final Row row : rows) {
@@ -100,11 +99,11 @@ class TableUpdater<T extends HasId> {
                 continue;
             }
 
-            if (hasInsertOrUpdateByItem) {
-                final T entity = typeOracle.convertFromRow(row);
-                table.insertOrUpdate(entity);
-            }
+            // Insert or update entity.
+            final T entity = typeOracle.convertFromRow(row);
+            table.insertOrUpdate(entity);
 
+            // Insert or update row.
             if (hasInsertOrUpdateByRow) {
                 table.insertOrUpdate(row);
             }

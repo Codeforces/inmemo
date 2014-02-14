@@ -114,10 +114,6 @@ public class Table<T extends HasId> {
         itemListeners.add(itemListener);
     }
 
-    boolean hasInsertOrUpdateByItem() {
-        return !itemListeners.isEmpty() || !indices.isEmpty();
-    }
-
     boolean hasInsertOrUpdateByRow() {
         return !rowListeners.isEmpty();
     }
