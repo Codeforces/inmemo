@@ -7,10 +7,7 @@ import org.springframework.beans.BeanUtils;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.sql.DataSource;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -416,19 +413,39 @@ public final class Inmemo {
         return table.findCount(indexConstraint, tableMatcher);
     }
 
+    private static <T extends HasId> Table<? extends HasId> getTableByClass(Class<T> clazz) {
+        final String tableClassName = ReflectionUtil.getTableClassName(clazz);
+        final Table<? extends HasId> table = tables.get(tableClassName);
+        if (table == null) {
+            throw new InmemoException("Unable to find table for class name `" + tableClassName + "`.");
+        }
+        return table;
+    }
+
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> void insertOrUpdate(@Nullable final T object) {
         if (object == null) {
             return;
         }
 
-        final String tableClassName = ReflectionUtil.getTableClassName(object.getClass());
-        final Table<? extends HasId> table = tables.get(tableClassName);
-        if (table == null) {
-            throw new InmemoException("Unable to find table for class name `" + tableClassName + "`.");
+        getTableByClass(object.getClass()).insertOrUpdate(object);
+    }
+
+    public static <T extends HasId> void insertOrUpdateByIds(Class<T> clazz, Long... ids) {
+        if (clazz == null) {
+            throw new IllegalArgumentException("Illegal arguments for Inmemo#insertOrUpdateByIds: "
+                    + "clazz = <null>");
+        }
+        if (ids == null) {
+            throw new IllegalArgumentException("Illegal arguments for Inmemo#insertOrUpdateByIds: "
+                    + "ids = <null>");
         }
 
-        table.insertOrUpdate(object);
+        if (ids.length == 0) {
+            return;
+        }
+
+        getTableByClass(clazz).insertOrUpdateByIds(ids);
     }
 
     @SuppressWarnings("UnusedDeclaration")

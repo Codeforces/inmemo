@@ -42,7 +42,7 @@ public class UserDaoImpl extends GenericDaoImpl<User, Long> implements UserDao {
         return user;
     }
 
-    private String getRandomString() {
+    public String getRandomString() {
         StringBuilder result = new StringBuilder();
 
         for (int i = 0; i < 16; i++) {
@@ -51,4 +51,5 @@ public class UserDaoImpl extends GenericDaoImpl<User, Long> implements UserDao {
 
         return result.toString();
     }
+
 }

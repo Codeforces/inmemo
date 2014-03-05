@@ -235,6 +235,19 @@ public class InmemoTest {
             Assert.assertTrue(hasException);
 
         }
+
+        // Tests insertOrUpdateByIds method
+        for (long i = 1; i <= USER_COUNT; i++) {
+            User user = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", i));
+            String newHandle = userDao.getRandomString();
+            user.setHandle(newHandle);
+
+            userDao.update(user);
+            Inmemo.insertOrUpdateByIds(User.class, user.getId());
+
+            User newUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", user.getId()));
+            Assert.assertEquals(newHandle, newUser.getHandle());
+        }
     }
 
     @Test

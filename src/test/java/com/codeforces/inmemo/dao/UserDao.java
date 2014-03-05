@@ -10,6 +10,9 @@ import java.util.List;
 public interface UserDao {
     User find(long id);
     void insertRandom();
+    void update(User user);
     List<User> findAll();
     User newRandomUser();
+
+    String getRandomString();
 }

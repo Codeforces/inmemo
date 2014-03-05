@@ -204,4 +204,14 @@ public class Table<T extends HasId> {
 
         return index.findCount(indexConstraint.getValue(), predicate);
     }
+
+    public void insertOrUpdateByIds(Long[] ids) {
+        for (Long id : ids) {
+            if (id == null) {
+                continue;
+            }
+
+            tableUpdater.insertOrUpdateById(id);
+        }
+    }
 }

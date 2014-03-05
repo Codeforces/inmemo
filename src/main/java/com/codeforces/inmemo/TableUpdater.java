@@ -77,6 +77,26 @@ class TableUpdater<T extends HasId> {
         thread.start();
     }
 
+    void insertOrUpdateById(Long id) {
+        List<Row> rows = jacuzzi.findRows(String.format("SELECT * FROM %s WHERE %s = %s",
+                typeOracle.getTableName(), typeOracle.getIdColumn(), id.toString()
+        ));
+
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+
+        if (rows.size() == 1) {
+            Row row = rows.get(0);
+            final T entity = typeOracle.convertFromRow(row);
+
+            table.insertOrUpdate(entity);
+            table.insertOrUpdate(row);
+        } else {
+            throw new InmemoException("Expected at most one item of " + table.getClazz() + " with id = " + id + ".");
+        }
+    }
+
     private void update() {
         long startTimeMillis = System.currentTimeMillis();
 
