@@ -463,5 +463,34 @@ public class InmemoTest {
 
             Assert.assertTrue(hasException);
         }
+
+        // Tests matcher for unique indices
+        {
+            long id = USER_COUNT / 5;
+            User existingUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id));
+            final String handle = existingUser.getHandle();
+            User notFoundUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id),
+                new Matcher<User>() {
+                    @Override
+                    public boolean match(User user) {
+                        return !user.getHandle().equals(handle);
+                    }
+                }
+            );
+
+            Assert.assertNull(notFoundUser);
+
+            List<User> emptyUserList = Inmemo.find(User.class, new IndexConstraint<>("ID", id),
+                    new Matcher<User>() {
+                        @Override
+                        public boolean match(User user) {
+                            return !user.getHandle().equals(handle);
+                        }
+                    }
+            );
+
+            Assert.assertTrue(emptyUserList.isEmpty());
+        }
+
     }
 }

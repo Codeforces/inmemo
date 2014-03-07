@@ -214,4 +214,8 @@ public class Table<T extends HasId> {
             tableUpdater.insertOrUpdateById(id);
         }
     }
+
+    List<T> findAndUpdateByEmergencyQueryFields(Object[] fields) {
+        return tableUpdater.findAndUpdateByEmergencyQueryFields(fields);
+    }
 }

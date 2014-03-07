@@ -97,6 +97,53 @@ class TableUpdater<T extends HasId> {
         }
     }
 
+    List<T> findAndUpdateByEmergencyQueryFields(Object[] fields) {
+        validateFieldsArray(fields);
+
+        String[] fieldNames = new String[fields.length / 2];
+        Object[] fieldValues = new Object[fields.length / 2];
+
+        for (int index = 0; index < fields.length; index += 2) {
+            fieldNames[index / 2] = (String) fields[index];
+            fieldValues[index / 2] = fields[index + 1];
+        }
+
+        String formattedFields = typeOracle.getQueryFindSql(fieldNames);
+
+        List<Row> rows = jacuzzi.findRows(String.format("SELECT * FROM %s WHERE %s ORDER BY %s",
+                typeOracle.getTableName(), formattedFields, typeOracle.getIdColumn()), fieldValues);
+
+        if (rows == null || rows.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<T> result = new ArrayList<>(rows.size());
+        for (Row row : rows) {
+            final T entity = typeOracle.convertFromRow(row);
+            result.add(entity);
+
+            table.insertOrUpdate(entity);
+            table.insertOrUpdate(row);
+        }
+
+        return result;
+    }
+
+    private void validateFieldsArray(Object[] fields) {
+        if (fields.length % 2 != 0) {
+            throw new IllegalArgumentException("EmergencyQueryFields array should have even length. Found: "
+                    + Arrays.toString(fields) + '.');
+        }
+
+        for (int index = 0; index < fields.length; index += 2) {
+            Object field = fields[index];
+            if (field == null || !(field instanceof String) || ((String) field).isEmpty()) {
+                throw new IllegalArgumentException("EmergencyQueryFields array must contain non-empty strings on even positions. Found: "
+                        + Arrays.toString(fields) + '.');
+            }
+        }
+    }
+
     private void update() {
         long startTimeMillis = System.currentTimeMillis();
 
