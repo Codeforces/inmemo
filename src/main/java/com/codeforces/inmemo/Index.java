@@ -208,6 +208,12 @@ public class Index<T extends HasId, V> {
                     if (!items.isEmpty()) {
                         tableItem = items.get(0);
                     }
+
+                    if (throwOnNotUnique && items.size() >= 2) {
+                        throw new InmemoException("Expected at most one item of " + table.getClazz()
+                                + " matching index " + getName()
+                                + " with value=" + value + ".");
+                    }
                 }
 
                 if (tableItem == null || !matcher.match(tableItem)) {

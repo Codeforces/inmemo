@@ -16,7 +16,6 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Arrays;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -582,7 +581,114 @@ public class InmemoTest {
         User newUser = userDao.newRandomUser();
         userDao.insert(newUser);
         User foundUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("idAndHandle", newUser.getId() + "," + newUser.getHandle()));
-        // TODO: Why Assert.assertEquals(newUser, foundUser) fails?
-        Assert.assertEquals(newUser.getEmail(), foundUser.getEmail());
+        newUser = userDao.find(newUser.getId());
+        Assert.assertEquals(newUser, foundUser);
+    }
+
+    @Test
+    public void testEmergencyDatabaseQuery() throws InterruptedException {
+        Inmemo.dropTableIfExists(User.class);
+
+        // Test user count.
+        {
+            Assert.assertEquals(USER_COUNT, userDao.findAll().size());
+        }
+
+        // Create table.
+        {
+            Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
+                add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
+                            @Override
+                            public Long get(final User tableItem) {
+                                return tableItem.getId();
+                            }
+                        }, new Index.EmergencyDatabaseHelper<Long>() {
+                            @Override
+                            public Object[] getEmergencyQueryFields(@Nullable Long id) {
+                                return new Object[]{"id", id};
+                            }
+                        }
+                )
+                );
+
+                add(Index.create("handle", String.class, new IndexGetter<User, String>() {
+                            @Override
+                            public String get(final User user) {
+                                return user.getHandle();
+                            }
+                        }, new Index.EmergencyDatabaseHelper<String>() {
+                            @Override
+                            public Object[] getEmergencyQueryFields(@Nullable String handle) {
+                                return new Object[]{"handle", handle};
+                            }
+                        }
+                ));
+
+                add(Index.create("handle2", String.class, new IndexGetter<User, String>() {
+                    @Override
+                    public String get(final User user) {
+                        return user.getHandle();
+                    }
+                }));
+
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
+                    @Override
+                    public String get(final User tableItem) {
+                        return tableItem.getHandle().substring(0, 1);
+                    }
+                }));
+            }}.build(), true);
+        }
+
+        // Assert size.
+        {
+            Assert.assertEquals(USER_COUNT, Inmemo.size(User.class));
+        }
+
+        {
+            User newUser = userDao.newRandomUser();
+            userDao.insert(newUser);
+
+            List<User> foundUsers = Inmemo.find(User.class, new IndexConstraint<>("ID", newUser.getId()));
+            newUser = userDao.find(newUser.getId());
+
+            Assert.assertTrue(foundUsers.contains(newUser));
+        }
+
+        {
+            User newUser = userDao.newRandomUser();
+            userDao.insert(newUser);
+
+            List<User> foundUsers = Inmemo.find(User.class, new IndexConstraint<>("handle", newUser.getHandle()));
+            newUser = userDao.find(newUser.getId());
+
+            Assert.assertTrue(foundUsers.contains(newUser));
+        }
+
+        {
+            User newUser = userDao.newRandomUser();
+            userDao.insert(newUser);
+
+            List<User> foundUsers = Inmemo.find(User.class, new IndexConstraint<>("handle2", newUser.getHandle()));
+            newUser = userDao.find(newUser.getId());
+
+            Assert.assertFalse(foundUsers.contains(newUser));
+        }
+
+        {
+            User newUser = userDao.newRandomUser();
+            userDao.insert(newUser);
+            List<User> foundUsers = Inmemo.find(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER",
+                    newUser.getHandle().substring(0, 1)));
+            newUser = userDao.find(newUser.getId());
+
+            Assert.assertFalse(foundUsers.contains(newUser));
+
+            Thread.sleep(1000);
+
+            foundUsers = Inmemo.find(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER",
+                    newUser.getHandle().substring(0, 1)));
+            Assert.assertTrue(foundUsers.contains(newUser));
+        }
     }
 }
