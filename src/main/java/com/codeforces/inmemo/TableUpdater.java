@@ -117,9 +117,13 @@ class TableUpdater<T extends HasId> {
             return Collections.emptyList();
         }
 
+        logger.warn("Emergency case: found " + rows.size() + " items of class " + table.getClazz().getName() + " [fields=" + formattedFields + "].");
+
         List<T> result = new ArrayList<>(rows.size());
         for (Row row : rows) {
             final T entity = typeOracle.convertFromRow(row);
+            logger.warn("Emergency found: " + table.getClazz().getName() + " id=" + entity.getId() + " [fields=" + formattedFields + "].");
+
             result.add(entity);
 
             table.insertOrUpdate(entity);
@@ -295,7 +299,8 @@ class TableUpdater<T extends HasId> {
                             + ": " + e, e);
                 }
             }
-        }
 
+            logger.warn("Inmemo update thread for " + table.getClazz().getName() + " finished");
+        }
     }
 }

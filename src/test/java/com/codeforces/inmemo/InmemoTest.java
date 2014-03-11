@@ -6,16 +6,19 @@ import com.codeforces.inmemo.model.User;
 import com.codeforces.inmemo.model.Wrapper;
 import com.codeforces.inmemo.model.Wrapper.a;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
+import com.mchange.v2.lang.ThreadUtils;
 import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import javax.annotation.Nullable;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 import static org.hamcrest.core.Is.is;
 import static org.hamcrest.core.IsNot.not;
@@ -470,12 +473,12 @@ public class InmemoTest {
             User existingUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id));
             final String handle = existingUser.getHandle();
             User notFoundUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id),
-                new Matcher<User>() {
-                    @Override
-                    public boolean match(User user) {
-                        return !user.getHandle().equals(handle);
+                    new Matcher<User>() {
+                        @Override
+                        public boolean match(User user) {
+                            return !user.getHandle().equals(handle);
+                        }
                     }
-                }
             );
 
             Assert.assertNull(notFoundUser);
@@ -491,6 +494,95 @@ public class InmemoTest {
 
             Assert.assertTrue(emptyUserList.isEmpty());
         }
+    }
 
+    @Test
+    public void testEmergency() throws InterruptedException {
+        Inmemo.dropTableIfExists(User.class);
+
+        // Test user count.
+        {
+            Assert.assertEquals(USER_COUNT, userDao.findAll().size());
+        }
+
+        // Create table.
+        {
+            Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
+                add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
+                    @Override
+                    public Long get(final User user) {
+                        return user.getId();
+                    }
+                }, new Index.EmergencyDatabaseHelper<Long>() {
+                            @Override
+                            public Object[] getEmergencyQueryFields(@Nullable Long indexValue) {
+                                return new Object[] {"ID", indexValue};
+                            }
+                        }));
+                add(Index.createUnique("handle", String.class, new IndexGetter<User, String>() {
+                    @Override
+                    public String get(final User user) {
+                        return user.getHandle();
+                    }
+                }));
+                add(Index.createUnique("idAndHandle", String.class, new IndexGetter<User, String>() {
+                    @Override
+                    public String get(final User user) {
+                        return user.getId() + "," + user.getHandle();
+                    }
+                }, new Index.EmergencyDatabaseHelper<String>() {
+                            @Override
+                            public Object[] getEmergencyQueryFields(@Nullable String indexValue) {
+                                String[] tokens = indexValue.split(",");
+                                return new Object[] {"ID", Long.valueOf(tokens[0]), "HANDLE", tokens[1]};
+                            }
+                        }));
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
+                    @Override
+                    public String get(final User tableItem) {
+                        return tableItem.getHandle().substring(0, 1);
+                    }
+                }));
+            }}.build(), true);
+        }
+
+        // Assert size.
+        {
+            Assert.assertEquals(USER_COUNT, Inmemo.size(User.class));
+        }
+
+        Map<Thread, StackTraceElement[]> traces = Thread.getAllStackTraces();
+        for (Thread thread : traces.keySet()) {
+            if ("InmemoUpdater#class com.codeforces.inmemo.model.User".equals(thread.getName())) {
+                thread.interrupt();
+                try {
+                    Thread.sleep(1000L);
+                } catch (InterruptedException e) {
+                    // No operations.
+                }
+            }
+        }
+
+        userDao.insertRandom();
+        Assert.assertEquals(USER_COUNT + 1, userDao.findAll().size());
+        Assert.assertEquals(USER_COUNT + 1, Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", USER_COUNT + 1)).getId());
+
+        userDao.insertRandom();
+        Assert.assertEquals(1, Inmemo.findCount(User.class, new IndexConstraint<>("ID", USER_COUNT + 1)));
+        Assert.assertEquals(1, Inmemo.findCount(User.class, new IndexConstraint<>("ID", USER_COUNT + 2)));
+        Assert.assertEquals(0, Inmemo.findCount(User.class, new IndexConstraint<>("ID", USER_COUNT + 3)));
+
+        userDao.insertRandom();
+        Assert.assertEquals(1, Inmemo.findCount(User.class, new IndexConstraint<>("ID", USER_COUNT + 3)));
+
+        Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 4)).size());
+        userDao.insertRandom();
+        Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 4)).size());
+
+        User newUser = userDao.newRandomUser();
+        userDao.insert(newUser);
+        User foundUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("idAndHandle", newUser.getId() + "," + newUser.getHandle()));
+        // TODO: Why Assert.assertEquals(newUser, foundUser) fails?
+        Assert.assertEquals(newUser.getEmail(), foundUser.getEmail());
     }
 }
