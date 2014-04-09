@@ -6,7 +6,6 @@ import com.codeforces.inmemo.model.User;
 import com.codeforces.inmemo.model.Wrapper;
 import com.codeforces.inmemo.model.Wrapper.a;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
-import com.mchange.v2.lang.ThreadUtils;
 import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -15,9 +14,8 @@ import javax.annotation.Nullable;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.*;
 
 import static org.hamcrest.core.Is.is;
 import static org.hamcrest.core.IsNot.not;
@@ -508,16 +506,17 @@ public class InmemoTest {
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
                 add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
-                    @Override
-                    public Long get(final User user) {
-                        return user.getId();
-                    }
-                }, new Index.EmergencyDatabaseHelper<Long>() {
+                            @Override
+                            public Long get(final User user) {
+                                return user.getId();
+                            }
+                        }, new Index.EmergencyDatabaseHelper<Long>() {
                             @Override
                             public Object[] getEmergencyQueryFields(@Nullable Long indexValue) {
-                                return new Object[] {"ID", indexValue};
+                                return new Object[]{"ID", indexValue};
                             }
-                        }));
+                        }
+                ));
                 add(Index.createUnique("handle", String.class, new IndexGetter<User, String>() {
                     @Override
                     public String get(final User user) {
@@ -525,17 +524,18 @@ public class InmemoTest {
                     }
                 }));
                 add(Index.createUnique("idAndHandle", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(final User user) {
-                        return user.getId() + "," + user.getHandle();
-                    }
-                }, new Index.EmergencyDatabaseHelper<String>() {
+                            @Override
+                            public String get(final User user) {
+                                return user.getId() + "," + user.getHandle();
+                            }
+                        }, new Index.EmergencyDatabaseHelper<String>() {
                             @Override
                             public Object[] getEmergencyQueryFields(@Nullable String indexValue) {
                                 String[] tokens = indexValue.split(",");
-                                return new Object[] {"ID", Long.valueOf(tokens[0]), "HANDLE", tokens[1]};
+                                return new Object[]{"ID", Long.valueOf(tokens[0]), "HANDLE", tokens[1]};
                             }
-                        }));
+                        }
+                ));
                 add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
                     @Override
                     public String get(final User tableItem) {
@@ -689,6 +689,103 @@ public class InmemoTest {
             foundUsers = Inmemo.find(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER",
                     newUser.getHandle().substring(0, 1)));
             Assert.assertTrue(foundUsers.contains(newUser));
+        }
+    }
+
+    @Test
+    public void testDeadlock() {
+        // Test user count.
+        {
+            Assert.assertEquals(USER_COUNT, userDao.findAll().size());
+        }
+
+        final Random random = new Random(123L);
+
+        final List<Long> userIds = new ArrayList<>(100);
+        for (int i = 0; i < 100; ++i)
+            userIds.add((long) random.nextInt((int) USER_COUNT));
+
+        // Create table.
+        Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
+            add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
+                        @Override
+                        public Long get(final User tableItem) {
+                            return tableItem.getId();
+                        }
+                    }, new Index.EmergencyDatabaseHelper<Long>() {
+                        @Override
+                        public Object[] getEmergencyQueryFields(@Nullable Long id) {
+                            return new Object[]{"id", id};
+                        }
+                    }
+            )
+            );
+
+            add(Index.create("handle", String.class, new IndexGetter<User, String>() {
+                        @Override
+                        public String get(final User user) {
+                            return user.getHandle();
+                        }
+                    }, new Index.EmergencyDatabaseHelper<String>() {
+                        @Override
+                        public Object[] getEmergencyQueryFields(@Nullable String handle) {
+                            return new Object[]{"handle", handle};
+                        }
+                    }
+            ));
+
+            add(Index.create("handle2", String.class, new IndexGetter<User, String>() {
+                @Override
+                public String get(final User user) {
+                    return user.getHandle();
+                }
+            }));
+
+            add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
+                @Override
+                public String get(final User tableItem) {
+                    return tableItem.getHandle().substring(0, 1);
+                }
+            }));
+        }}.build(), false);
+
+        ExecutorService executorService = Executors.newFixedThreadPool(10);
+
+        for (int i = 0; i < 10; ++i) {
+            executorService.submit(new Runnable() {
+                @Override
+                public void run() {
+                    for (Long userId : userIds) {
+                        try {
+                            User user = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", userId));
+                            Assert.assertNotNull(user);
+                        } catch (InmemoException e) {
+                            Assert.assertTrue(e.getMessage().contains("Unable to find table for class name"));
+                        }
+                    }
+                }
+            });
+
+            executorService.submit(new Runnable() {
+                @Override
+                public void run() {
+                    for (Long userId : userIds) {
+                        try {
+                            Inmemo.insertOrUpdateByIds(User.class, userId);
+                        } catch (InmemoException e) {
+                            Assert.assertTrue(e.getMessage().contains("Unable to find table for class name"));
+                        }
+                    }
+                }
+            });
+        }
+
+        executorService.shutdown();
+
+        try {
+            Assert.assertTrue(executorService.awaitTermination(10, TimeUnit.SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

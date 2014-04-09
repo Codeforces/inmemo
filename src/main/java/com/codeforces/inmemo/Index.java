@@ -7,8 +7,6 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * @author MikeMirzayanov (mirzayanovmr@gmail.com)
@@ -26,9 +24,6 @@ public class Index<T extends HasId, V> {
 
     // Actually, it has type ConcurrentMap<V, >> but can't be used because of non-null keys in ConcurrentHashMap.
     private final ConcurrentMap<Object, T> uniqueMap;
-
-    // Actually, it has type ConcurrentMap<V, Lock> but can't be used because of non-null keys in ConcurrentHashMap.
-    private final ConcurrentMap<Object, Lock> locks;
 
     private final EmergencyDatabaseHelper<V> emergencyDatabaseHelper;
 
@@ -51,7 +46,6 @@ public class Index<T extends HasId, V> {
         this.unique = unique;
         this.emergencyDatabaseHelper = emergencyDatabaseHelper;
 
-        locks = new ConcurrentHashMap<>();
         if (unique) {
             uniqueMap = new ConcurrentHashMap<>();
             map = null;
@@ -91,7 +85,6 @@ public class Index<T extends HasId, V> {
         return new Index<>(name, indexClass, indexGetter, true, emergencyDatabaseHelper);
     }
 
-
     void setTable(final Table<T> table) {
         this.table = table;
     }
@@ -109,39 +102,25 @@ public class Index<T extends HasId, V> {
         }
 
         if (unique) {
-            locks.putIfAbsent(value, new ReentrantLock());
-            final Lock lock = locks.get(value);
-            lock.lock();
-            try {
-                final T previousTableItem = uniqueMap.get(value);
-                if (previousTableItem != null
-                        && previousTableItem.getId() != tableItem.getId()) {
-                    throw new InmemoException("Index `" + getName()
-                            + "` expected to be unique but it has multiple items for value="
-                            + value + " [previousTableItem=" + previousTableItem + ", newTableItem=" + tableItem + "].");
-                }
-
-                uniqueMap.put(value, tableItem);
-            } finally {
-                lock.unlock();
+            final T previousTableItem = uniqueMap.get(value);
+            if (previousTableItem != null
+                    && previousTableItem.getId() != tableItem.getId()) {
+                throw new InmemoException("Index `" + getName()
+                        + "` expected to be unique but it has multiple items for value="
+                        + value + " [previousTableItem=" + previousTableItem + ", newTableItem=" + tableItem + "].");
             }
+
+            uniqueMap.put(value, tableItem);
         } else {
-            if (!map.containsKey(value) || !locks.containsKey(value)) {
+            if (!map.containsKey(value)) {
                 map.putIfAbsent(value, new ConcurrentHashMap<Long, T>());
-                locks.putIfAbsent(value, new ReentrantLock());
             }
 
-            final Lock lock = locks.get(value);
-            lock.lock();
-            try {
-                map.get(value).put(tableItem.getId(), tableItem);
-            } finally {
-                lock.unlock();
-            }
+            map.get(value).put(tableItem.getId(), tableItem);
         }
     }
 
-    List<T> internalFind(final V value, final Matcher<T> matcher) {
+    private List<T> internalFind(final V value, final Matcher<T> matcher) {
         if (unique) {
             final T tableItem = internalFindOnly(true, value, matcher);
             if (tableItem == null) {
@@ -170,16 +149,10 @@ public class Index<T extends HasId, V> {
 
         final List<T> result = new ArrayList<>(tableItems.size());
 
-        final Lock lock = locks.get(wrappedValue);
-        lock.lock();
-        try {
-            for (final T tableItem : tableItems) {
-                if (matcher.match(tableItem)) {
-                    result.add(tableItem);
-                }
+        for (final T tableItem : tableItems) {
+            if (matcher.match(tableItem)) {
+                result.add(tableItem);
             }
-        } finally {
-            lock.unlock();
         }
 
         return result;
@@ -194,35 +167,28 @@ public class Index<T extends HasId, V> {
         final Object wrappedValue = wrapValue(value);
 
         if (unique) {
-            locks.putIfAbsent(wrappedValue, new ReentrantLock());
-            final Lock lock = locks.get(wrappedValue);
-            lock.lock();
-            try {
-                T tableItem = uniqueMap.get(wrappedValue);
+            T tableItem = uniqueMap.get(wrappedValue);
 
-                if (tableItem == null && emergencyDatabaseHelper != null) {
-                    List<T> items = table.findAndUpdateByEmergencyQueryFields(
-                            emergencyDatabaseHelper.getEmergencyQueryFields(value)
-                    );
+            if (tableItem == null && emergencyDatabaseHelper != null) {
+                List<T> items = table.findAndUpdateByEmergencyQueryFields(
+                        emergencyDatabaseHelper.getEmergencyQueryFields(value)
+                );
 
-                    if (!items.isEmpty()) {
-                        tableItem = items.get(0);
-                    }
-
-                    if (throwOnNotUnique && items.size() >= 2) {
-                        throw new InmemoException("Expected at most one item of " + table.getClazz()
-                                + " matching index " + getName()
-                                + " with value=" + value + ".");
-                    }
+                if (!items.isEmpty()) {
+                    tableItem = items.get(0);
                 }
 
-                if (tableItem == null || !matcher.match(tableItem)) {
-                    return null;
-                } else {
-                    return tableItem;
+                if (throwOnNotUnique && items.size() >= 2) {
+                    throw new InmemoException("Expected at most one item of " + table.getClazz()
+                            + " matching index " + getName()
+                            + " with value=" + value + ".");
                 }
-            } finally {
-                lock.unlock();
+            }
+
+            if (tableItem == null || !matcher.match(tableItem)) {
+                return null;
+            } else {
+                return tableItem;
             }
         } else {
             final Map<Long, T> valueMap = map.get(wrappedValue);
@@ -237,28 +203,22 @@ public class Index<T extends HasId, V> {
 
             final List<T> result = new ArrayList<>(2);
 
-            final Lock lock = locks.get(wrappedValue);
-            lock.lock();
-            try {
-                for (final T tableItem : tableItems) {
-                    if (matcher.match(tableItem)) {
-                        result.add(tableItem);
-                        if (!throwOnNotUnique) {
-                            break;
-                        } else {
-                            if (result.size() >= 2) {
-                                throw new InmemoException("Expected at most one item of " + table.getClazz()
-                                        + " matching index " + getName()
-                                        + " with value=" + value + ".");
-                            }
+            for (final T tableItem : tableItems) {
+                if (matcher.match(tableItem)) {
+                    result.add(tableItem);
+                    if (!throwOnNotUnique) {
+                        break;
+                    } else {
+                        if (result.size() >= 2) {
+                            throw new InmemoException("Expected at most one item of " + table.getClazz()
+                                    + " matching index " + getName()
+                                    + " with value=" + value + ".");
                         }
                     }
                 }
-
-                return result.isEmpty() ? null : result.get(0);
-            } finally {
-                lock.unlock();
             }
+
+            return result.isEmpty() ? null : result.get(0);
         }
     }
 
