@@ -154,8 +154,18 @@ class TableUpdater<T extends HasId> {
         final List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
 
         if (rows.size() >= 10) {
-            logger.info(String.format("Thread '%s' has found %s rows to update in %d ms.", threadName,
+            logger.info(String.format("Thread '%s' has found %s rows to update in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].", threadName,
                     rows.size(), System.currentTimeMillis() - startTimeMillis));
+            if (rows.size() <= 100) {
+                StringBuilder ids = new StringBuilder();
+                for (Row row : rows) {
+                    if (ids.length() > 0) {
+                        ids.append(",");
+                    }
+                    ids.append(row.get(typeOracle.getIdColumn()));
+                }
+                logger.info("Updated entries have id=" + ids + ".");
+            }
         }
 
         int updatedCount = 0;
@@ -167,6 +177,7 @@ class TableUpdater<T extends HasId> {
             long id = getRowId(row);
             if (ObjectUtils.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
                     && lastUpdatedEntityIds.contains(id)) {
+                // logger.info("Thread " + threadName + " skipped id=" + id + ".");
                 continue;
             }
 
@@ -185,7 +196,7 @@ class TableUpdater<T extends HasId> {
         }
 
         if (updatedCount >= 10) {
-            logger.info(String.format("Thread '%s' has updated %d items in %d ms.",
+            logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
                     threadName, updatedCount, System.currentTimeMillis() - startTimeMillis));
         }
 
