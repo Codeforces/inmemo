@@ -9,12 +9,12 @@ public class ItemListener<T extends HasId> {
     private final String name;
     private final Listener<T> listener;
 
-    public ItemListener(@Nonnull final String name, @Nonnull final Listener<T> listener) {
+    public ItemListener(@Nonnull String name, @Nonnull Listener<T> listener) {
         this.name = name;
         this.listener = listener;
     }
 
-    public void insertOrUpdate(@Nonnull final T item) {
+    public void insertOrUpdate(@Nonnull T item) {
         listener.onInsertOrUpdate(item);
     }
 
@@ -22,7 +22,7 @@ public class ItemListener<T extends HasId> {
         return name;
     }
 
-    public static interface Listener<T extends HasId> {
+    public interface Listener<T extends HasId> {
         void onInsertOrUpdate(T item);
     }
 }
