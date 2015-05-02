@@ -148,36 +148,20 @@ class TableUpdater<T extends HasId> {
         }
     }
 
-    private void update() {
+    private void update(Random timeSleepRandom) {
         long startTimeMillis = System.currentTimeMillis();
 
         final List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
+        final long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
 
-        if (rows.size() >= 10) {
-            logger.info(String.format("Thread '%s' has found %s rows to update in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].", threadName,
-                    rows.size(), System.currentTimeMillis() - startTimeMillis));
-            if (rows.size() <= 100) {
-                StringBuilder ids = new StringBuilder();
-                for (Row row : rows) {
-                    if (ids.length() > 0) {
-                        ids.append(",");
-                    }
-                    ids.append(row.get(typeOracle.getIdColumn()));
-                }
-                logger.info("Updated entries have id=" + ids + ".");
-            }
-        }
-
-        int updatedCount = 0;
         final Object previousIndicatorLastValue = lastIndicatorValue;
-
         final boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
+        final List<Long> updatedIds = new ArrayList<>();
 
         for (final Row row : rows) {
             long id = getRowId(row);
             if (ObjectUtils.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
                     && lastUpdatedEntityIds.contains(id)) {
-                // logger.info("Thread " + threadName + " skipped id=" + id + ".");
                 continue;
             }
 
@@ -185,24 +169,36 @@ class TableUpdater<T extends HasId> {
             final T entity = typeOracle.convertFromRow(row);
             table.insertOrUpdate(entity);
 
+            updatedIds.add(id);
+
             // Insert or update row.
             if (hasInsertOrUpdateByRow) {
                 table.insertOrUpdate(row);
             }
 
-            // logger.log(Level.INFO, "Updated entity " + entity + '.');
             lastIndicatorValue = row.get(table.getIndicatorField());
-            ++updatedCount;
         }
 
-        if (updatedCount >= 10) {
+        if (updatedIds.size() >= 10) {
+            logger.info(String.format("Thread '%s' has found %s rows to update in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].", threadName,
+                    rows.size(), afterGetRecentlyChangedRowsMillis - startTimeMillis));
+
+            if (updatedIds.size() <= 100) {
+                StringBuilder ids = new StringBuilder();
+                for (long id : updatedIds) {
+                    if (ids.length() > 0) {
+                        ids.append(",");
+                    }
+                    ids.append(id);
+                }
+                logger.info("Updated entries have id=" + ids + ".");
+            }
+
             logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
-                    threadName, updatedCount, System.currentTimeMillis() - startTimeMillis));
+                    threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
         }
 
-        if (rows.size() <= lastUpdatedEntityIds.size()
-                && rows.size() < MAX_ROWS_IN_SINGLE_SQL_STATEMENT / 2
-                && !table.isPreloaded()) {
+        if (updatedIds.isEmpty() && !table.isPreloaded()) {
             logger.info("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
                     + " [items=" + table.size() + "] in " + (System.currentTimeMillis() - TableUpdater.this.startTimeMillis) + " ms.");
             table.setPreloaded(true);
@@ -215,7 +211,7 @@ class TableUpdater<T extends HasId> {
             }
         }
 
-        sleepBetweenRescans(updatedCount);
+        sleepBetweenRescans(timeSleepRandom, updatedIds.size());
     }
 
     private long getRowId(Row row) {
@@ -226,15 +222,15 @@ class TableUpdater<T extends HasId> {
         return id;
     }
 
-    private void sleepBetweenRescans(final int updatedCount) {
+    private void sleepBetweenRescans(final Random timeSleepRandom, final int updatedCount) {
         if (updatedCount == 0) {
-            sleep(rescanTimeMillis);
+            sleep((4 * rescanTimeMillis / 5) + timeSleepRandom.nextInt((int) (rescanTimeMillis / 5)));
         } else if ((updatedCount << 1) > MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
             logger.info(String.format(
                     "Thread '%s' will not sleep because it updated near maximum row count.", threadName
             ));
         } else {
-            sleep(rescanTimeMillis / 10);
+            sleep(timeSleepRandom.nextInt((int) (rescanTimeMillis / 5)));
         }
     }
 
@@ -301,9 +297,13 @@ class TableUpdater<T extends HasId> {
     private class TableUpdaterRunnable implements Runnable {
         @Override
         public void run() {
+            AttachConnectionHelper attachConnectionHelper = new AttachConnectionHelper();
+            Random sleepRandom = new Random();
+
             while (running) {
+                attachConnectionHelper.reattach();
                 try {
-                    update();
+                    update(sleepRandom);
                 } catch (Exception e) {
                     logger.error("Unexpected " + e.getClass().getName() + " exception in TableUpdaterRunnable of "
                             + threadName
@@ -311,7 +311,32 @@ class TableUpdater<T extends HasId> {
                 }
             }
 
+            attachConnectionHelper.stop();
             logger.warn("Inmemo update thread for " + table.getClazz().getName() + " finished");
+        }
+    }
+
+    private final class AttachConnectionHelper {
+        private static final long ATTACH_TIME_MILLIS = 90_000; /* 1.5 minutes. */
+        private long attachTimeMillis;
+
+        private AttachConnectionHelper() {
+            this.attachTimeMillis = System.currentTimeMillis();
+            logger.info("Initially attached connection for " + thread.getName() + ".");
+            jacuzzi.attachConnection();
+        }
+
+        void reattach() {
+            if (attachTimeMillis + ATTACH_TIME_MILLIS < System.currentTimeMillis()) {
+                attachTimeMillis = System.currentTimeMillis();
+                logger.info("Reattaching connection for " + thread.getName() + ".");
+                jacuzzi.detachConnection();
+                jacuzzi.attachConnection();
+            }
+        }
+
+        public void stop() {
+            jacuzzi.detachConnection();
         }
     }
 }

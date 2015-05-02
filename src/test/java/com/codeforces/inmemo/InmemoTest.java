@@ -25,6 +25,7 @@ import static org.hamcrest.core.IsNot.not;
  */
 public class InmemoTest {
     private static final long USER_COUNT = 10000;
+    private static final long BASE_SLEEP_MS = 500;
 
     private UserDao userDao;
 
@@ -125,7 +126,7 @@ public class InmemoTest {
 
             userDao.insertRandom();
 
-            Thread.sleep(500);
+            Thread.sleep(BASE_SLEEP_MS);
 
             Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<User>() {
                 @Override
@@ -238,6 +239,7 @@ public class InmemoTest {
 
         // Tests insertOrUpdateByIds method
         for (long i = 1; i <= USER_COUNT; i++) {
+            System.out.println(i);
             User user = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", i));
             String newHandle = userDao.getRandomString();
             user.setHandle(newHandle);
@@ -313,7 +315,7 @@ public class InmemoTest {
             }).size());
 
             userDao.insertRandom();
-            Thread.sleep(500);
+            Thread.sleep(BASE_SLEEP_MS);
 
             Assert.assertEquals(1, Inmemo.find(Wrapper.a.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<Wrapper.a>() {
                 @Override
@@ -426,7 +428,7 @@ public class InmemoTest {
             Assert.assertNull(Inmemo.findOnly(false, User.class, new IndexConstraint<>("ID", USER_COUNT + 1)));
 
             userDao.insertRandom();
-            Thread.sleep(500);
+            Thread.sleep(BASE_SLEEP_MS);
 
             Assert.assertEquals(USER_COUNT + 1, Inmemo.findOnly(false, User.class, new IndexConstraint<>("ID", USER_COUNT + 1)).getId());
         }
@@ -555,7 +557,7 @@ public class InmemoTest {
             if ("InmemoUpdater#class com.codeforces.inmemo.model.User".equals(thread.getName())) {
                 thread.interrupt();
                 try {
-                    Thread.sleep(1000L);
+                    Thread.sleep(BASE_SLEEP_MS * 2);
                 } catch (InterruptedException e) {
                     // No operations.
                 }
@@ -684,7 +686,7 @@ public class InmemoTest {
 
             Assert.assertFalse(foundUsers.contains(newUser));
 
-            Thread.sleep(1000);
+            Thread.sleep(BASE_SLEEP_MS * 2);
 
             foundUsers = Inmemo.find(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER",
                     newUser.getHandle().substring(0, 1)));
