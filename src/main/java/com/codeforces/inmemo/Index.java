@@ -35,9 +35,9 @@ public class Index<T extends HasId, V> {
     private final Class<?> indexClass;
 
     private Index(
-            final String name,
-            final Class<V> indexClass,
-            final IndexGetter<T, V> indexGetter,
+            String name,
+            Class<V> indexClass,
+            IndexGetter<T, V> indexGetter,
             boolean unique,
             EmergencyDatabaseHelper<V> emergencyDatabaseHelper) {
         this.name = name;
@@ -56,45 +56,45 @@ public class Index<T extends HasId, V> {
     }
 
     @SuppressWarnings("UnusedDeclaration")
-    public static <T extends HasId, V> Index<T, V> create(final String name,
-                                                          final Class<V> indexClass,
-                                                          final IndexGetter<T, V> indexGetter) {
+    public static <T extends HasId, V> Index<T, V> create(String name,
+                                                          Class<V> indexClass,
+                                                          IndexGetter<T, V> indexGetter) {
         return create(name, indexClass, indexGetter, null);
     }
 
     @SuppressWarnings("UnusedDeclaration")
-    public static <T extends HasId, V> Index<T, V> createUnique(final String name,
-                                                                final Class<V> indexClass,
-                                                                final IndexGetter<T, V> indexGetter) {
+    public static <T extends HasId, V> Index<T, V> createUnique(String name,
+                                                                Class<V> indexClass,
+                                                                IndexGetter<T, V> indexGetter) {
         return createUnique(name, indexClass, indexGetter, null);
     }
 
     @SuppressWarnings("UnusedDeclaration")
-    public static <T extends HasId, V> Index<T, V> create(final String name,
-                                                          final Class<V> indexClass,
-                                                          final IndexGetter<T, V> indexGetter,
-                                                          final EmergencyDatabaseHelper<V> emergencyDatabaseHelper) {
+    public static <T extends HasId, V> Index<T, V> create(String name,
+                                                          Class<V> indexClass,
+                                                          IndexGetter<T, V> indexGetter,
+                                                          EmergencyDatabaseHelper<V> emergencyDatabaseHelper) {
         return new Index<>(name, indexClass, indexGetter, false, emergencyDatabaseHelper);
     }
 
     @SuppressWarnings("UnusedDeclaration")
-    public static <T extends HasId, V> Index<T, V> createUnique(final String name,
-                                                                final Class<V> indexClass,
-                                                                final IndexGetter<T, V> indexGetter,
-                                                                final EmergencyDatabaseHelper<V> emergencyDatabaseHelper) {
+    public static <T extends HasId, V> Index<T, V> createUnique(String name,
+                                                                Class<V> indexClass,
+                                                                IndexGetter<T, V> indexGetter,
+                                                                EmergencyDatabaseHelper<V> emergencyDatabaseHelper) {
         return new Index<>(name, indexClass, indexGetter, true, emergencyDatabaseHelper);
     }
 
-    void setTable(final Table<T> table) {
+    void setTable(Table<T> table) {
         this.table = table;
     }
 
-    private Object wrapValue(final V value) {
+    private Object wrapValue(V value) {
         return value == null ? NULL : value;
     }
 
-    void insertOrUpdate(@Nonnull final T tableItem) {
-        final Object value = wrapValue(indexGetter.get(tableItem));
+    void insertOrUpdate(@Nonnull T tableItem) {
+        Object value = wrapValue(indexGetter.get(tableItem));
 
         if (value != NULL && value.getClass() != indexClass) {
             logger.info("Item of " + tableItem.getClass() + " is invalid for index '"
@@ -102,10 +102,10 @@ public class Index<T extends HasId, V> {
         }
 
         if (unique) {
-            final T previousTableItem = uniqueMap.get(value);
+            T previousTableItem = uniqueMap.get(value);
             if (previousTableItem != null
                     && previousTableItem.getId() != tableItem.getId()) {
-                throw new InmemoException("Index `" + getName()
+                throw new InmemoException("Index `" + name
                         + "` expected to be unique but it has multiple items for value="
                         + value + " [previousTableItem=" + previousTableItem + ", newTableItem=" + tableItem + "].");
             }
@@ -120,9 +120,9 @@ public class Index<T extends HasId, V> {
         }
     }
 
-    private List<T> internalFind(final V value, final Matcher<T> matcher) {
+    private List<T> internalFind(V value, Matcher<T> matcher) {
         if (unique) {
-            final T tableItem = internalFindOnly(true, value, matcher);
+            T tableItem = internalFindOnly(true, value, matcher);
             if (tableItem == null) {
                 return Collections.emptyList();
             } else {
@@ -135,9 +135,9 @@ public class Index<T extends HasId, V> {
                     + table.getClazz().getName() + '#' + name + "'.");
         }
 
-        final Object wrappedValue = wrapValue(value);
+        Object wrappedValue = wrapValue(value);
 
-        final Map<Long, T> valueMap = map.get(wrappedValue);
+        Map<Long, T> valueMap = map.get(wrappedValue);
 
         if ((valueMap == null || valueMap.isEmpty()) && emergencyDatabaseHelper == null) {
             return Collections.emptyList();
@@ -147,9 +147,9 @@ public class Index<T extends HasId, V> {
                 ? table.findAndUpdateByEmergencyQueryFields(emergencyDatabaseHelper.getEmergencyQueryFields(value))
                 : valueMap.values();
 
-        final List<T> result = new ArrayList<>(tableItems.size());
+        List<T> result = new ArrayList<>(tableItems.size());
 
-        for (final T tableItem : tableItems) {
+        for (T tableItem : tableItems) {
             if (matcher.match(tableItem)) {
                 result.add(tableItem);
             }
@@ -164,7 +164,7 @@ public class Index<T extends HasId, V> {
                     + table.getClazz().getName() + '#' + name + "'.");
         }
 
-        final Object wrappedValue = wrapValue(value);
+        Object wrappedValue = wrapValue(value);
 
         if (unique) {
             T tableItem = uniqueMap.get(wrappedValue);
@@ -180,8 +180,8 @@ public class Index<T extends HasId, V> {
 
                 if (throwOnNotUnique && items.size() >= 2) {
                     throw new InmemoException("Expected at most one item of " + table.getClazz()
-                            + " matching index " + getName()
-                            + " with value=" + value + ".");
+                            + " matching index " + name
+                            + " with value=" + value + '.');
                 }
             }
 
@@ -191,7 +191,7 @@ public class Index<T extends HasId, V> {
                 return tableItem;
             }
         } else {
-            final Map<Long, T> valueMap = map.get(wrappedValue);
+            Map<Long, T> valueMap = map.get(wrappedValue);
 
             if ((valueMap == null || valueMap.isEmpty()) && emergencyDatabaseHelper == null) {
                 return null;
@@ -201,19 +201,19 @@ public class Index<T extends HasId, V> {
                     ? table.findAndUpdateByEmergencyQueryFields(emergencyDatabaseHelper.getEmergencyQueryFields(value))
                     : valueMap.values();
 
-            final List<T> result = new ArrayList<>(2);
+            List<T> result = new ArrayList<>(2);
 
-            for (final T tableItem : tableItems) {
+            for (T tableItem : tableItems) {
                 if (matcher.match(tableItem)) {
                     result.add(tableItem);
-                    if (!throwOnNotUnique) {
-                        break;
-                    } else {
+                    if (throwOnNotUnique) {
                         if (result.size() >= 2) {
                             throw new InmemoException("Expected at most one item of " + table.getClazz()
-                                    + " matching index " + getName()
-                                    + " with value=" + value + ".");
+                                    + " matching index " + name
+                                    + " with value=" + value + '.');
                         }
+                    } else {
+                        break;
                     }
                 }
             }
@@ -222,7 +222,7 @@ public class Index<T extends HasId, V> {
         }
     }
 
-    long internalFindCount(final V value, final Matcher<T> matcher) {
+    long internalFindCount(V value, Matcher<T> matcher) {
         return internalFind(value, matcher).size();
     }
 
@@ -231,24 +231,24 @@ public class Index<T extends HasId, V> {
     }
 
     @SuppressWarnings("unchecked")
-    List<T> find(final Object value, final Matcher<T> predicate) {
+    List<T> find(Object value, Matcher<T> predicate) {
         return internalFind((V) value, predicate);
     }
 
     @SuppressWarnings("unchecked")
-    public T findOnly(final boolean throwOnNotUnique, final Object value, final Matcher<T> predicate) {
+    public T findOnly(boolean throwOnNotUnique, Object value, Matcher<T> predicate) {
         return internalFindOnly(throwOnNotUnique, (V) value, predicate);
     }
 
     @SuppressWarnings("unchecked")
-    long findCount(final Object value, final Matcher<T> predicate) {
+    long findCount(Object value, Matcher<T> predicate) {
         return internalFindCount((V) value, predicate);
     }
 
     /**
      * Helper interface to emergency query database if object is not found in memory.
      */
-    public static interface EmergencyDatabaseHelper<V> {
+    public interface EmergencyDatabaseHelper<V> {
         /**
          * @param indexValue index value
          * @return mixed array of pairs: (database column name, value). So the length of array is always even.

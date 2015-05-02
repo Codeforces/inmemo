@@ -21,7 +21,7 @@ final class ReflectionUtil {
         // No operations.
     }
 
-    public static <T> T newInstance(final Class<T> clazz) {
+    public static <T> T newInstance(Class<T> clazz) {
         FastClass fastClass = fastClasses.get(clazz);
         if (fastClass == null) {
             fastClasses.put(clazz, FastClass.create(clazz));
@@ -36,12 +36,12 @@ final class ReflectionUtil {
         }
     }
 
-    public static String getTableClassSpec(final Class<?> clazz) {
+    public static String getTableClassSpec(Class<?> clazz) {
         try {
-            final BeanInfo beanInfo = Introspector.getBeanInfo(clazz);
+            BeanInfo beanInfo = Introspector.getBeanInfo(clazz);
 
-            final StringBuilder result = new StringBuilder();
-            for (final PropertyDescriptor propertyDescriptor : beanInfo.getPropertyDescriptors()) {
+            StringBuilder result = new StringBuilder();
+            for (PropertyDescriptor propertyDescriptor : beanInfo.getPropertyDescriptors()) {
                 result.append(propertyDescriptor.getName())
                         .append(':')
                         .append(propertyDescriptor.getPropertyType().getName())
@@ -54,7 +54,7 @@ final class ReflectionUtil {
         }
     }
 
-    public static String getTableClassName(final Class<?> clazz) {
+    public static String getTableClassName(Class<?> clazz) {
         String cachedResult = tableClassNamesCache.get(clazz);
         if (cachedResult != null) {
             return cachedResult;
@@ -63,7 +63,7 @@ final class ReflectionUtil {
         Class<?> currentClass = clazz;
 
         while (currentClass != null) {
-            final String currentClassName = currentClass.getName();
+            String currentClassName = currentClass.getName();
             if (currentClassName.contains("$")) {
                 currentClass = currentClass.getSuperclass();
             } else {

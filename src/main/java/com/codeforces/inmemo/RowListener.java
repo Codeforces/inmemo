@@ -16,7 +16,7 @@ public class RowListener {
         this.listener = listener;
     }
 
-    public void insertOrUpdate(@Nonnull final Row row) {
+    public void insertOrUpdate(@Nonnull Row row) {
         listener.onInsertOrUpdate(row);
     }
 
@@ -24,7 +24,7 @@ public class RowListener {
         return name;
     }
 
-    public static interface Listener {
+    public interface Listener {
         void onInsertOrUpdate(@Nonnull Row row);
     }
 }

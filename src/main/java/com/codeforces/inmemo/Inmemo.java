@@ -37,12 +37,12 @@ public final class Inmemo {
         // No operations.
     }
 
-    private static BeanCopier getBeanCopier(final Class<?> sourceClass, final Class<?> targetClass) {
-        final ClassPair classPair = new ClassPair(sourceClass, targetClass);
-        final BeanCopier beanCopier = beanCopiers.get(classPair);
+    private static BeanCopier getBeanCopier(Class<?> sourceClass, Class<?> targetClass) {
+        ClassPair classPair = new ClassPair(sourceClass, targetClass);
+        BeanCopier beanCopier = beanCopiers.get(classPair);
         if (beanCopier == null) {
             BeanCopier copier = BeanCopier.create(sourceClass, targetClass, false);
-            logger.info("Created BeanCopier(" + sourceClass + "," + targetClass + ").");
+            logger.info("Created BeanCopier(" + sourceClass + ',' + targetClass + ").");
             beanCopiers.putIfAbsent(classPair, copier);
             return beanCopiers.get(classPair);
         } else {
@@ -64,7 +64,7 @@ public final class Inmemo {
     public static boolean isPreloaded() {
         tablesLock.lock();
         try {
-            for (final Table<? extends HasId> table : tables.values()) {
+            for (Table<? extends HasId> table : tables.values()) {
                 if (!table.isPreloaded()) {
                     return false;
                 }
@@ -89,15 +89,15 @@ public final class Inmemo {
      */
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> void createTable(
-            @Nonnull final Class<T> clazz,
-            @Nonnull final String indicatorField,
-            @Nullable final Object initialIndicatorValue,
-            @Nonnull final Indices<T> indices,
-            final boolean waitForPreload) {
+            @Nonnull Class<T> clazz,
+            @Nonnull String indicatorField,
+            @Nullable Object initialIndicatorValue,
+            @Nonnull Indices<T> indices,
+            boolean waitForPreload) {
         tablesLock.lock();
 
         try {
-            final String tableClassName = ReflectionUtil.getTableClassName(clazz);
+            String tableClassName = ReflectionUtil.getTableClassName(clazz);
 
             Table<? extends HasId> table = tables.get(tableClassName);
             if (table == null) {
@@ -112,7 +112,7 @@ public final class Inmemo {
                             break;
                         }
                     }
-                    logger.info("Inmemo completed to wait for preload " + tableClassName + ".");
+                    logger.info("Inmemo completed to wait for preload " + tableClassName + '.');
                 }
             } else {
                 // Exactly the same class?
@@ -121,7 +121,7 @@ public final class Inmemo {
                     return;
                 }
 
-                final String clazzSpec = ReflectionUtil.getTableClassSpec(clazz);
+                String clazzSpec = ReflectionUtil.getTableClassSpec(clazz);
                 // Compatible classes?
                 if (table.getClazzSpec().equals(clazzSpec)) {
                     logger.info("Compatible classes " + tableClassName + " [class=" + clazz + "].");
@@ -139,7 +139,7 @@ public final class Inmemo {
                             break;
                         }
                     }
-                    logger.info("Inmemo completed to wait for preload " + tableClassName + ".");
+                    logger.info("Inmemo completed to wait for preload " + tableClassName + '.');
                 }
             }
         } finally {
@@ -153,9 +153,9 @@ public final class Inmemo {
      * @param clazz Table class.
      * @param <T>   Entity class.
      */
-    public static <T> void dropTableIfExists(@Nonnull final Class<T> clazz) {
-        final String tableClassName = ReflectionUtil.getTableClassName(clazz);
-        final Table<? extends HasId> table = tables.get(tableClassName);
+    public static <T> void dropTableIfExists(@Nonnull Class<T> clazz) {
+        String tableClassName = ReflectionUtil.getTableClassName(clazz);
+        Table<? extends HasId> table = tables.get(tableClassName);
 
         if (table != null) {
             tablesLock.lock();
@@ -167,9 +167,9 @@ public final class Inmemo {
         }
     }
 
-    public static <T> int size(@Nonnull final Class<T> clazz) {
-        final String tableClassName = ReflectionUtil.getTableClassName(clazz);
-        final Table<? extends HasId> table = tables.get(tableClassName);
+    public static <T> int size(@Nonnull Class<T> clazz) {
+        String tableClassName = ReflectionUtil.getTableClassName(clazz);
+        Table<? extends HasId> table = tables.get(tableClassName);
 
         if (table != null) {
             return table.size();
@@ -179,9 +179,9 @@ public final class Inmemo {
     }
 
     @SuppressWarnings("UnusedDeclaration")
-    public static <T> void waitForPreload(@Nonnull final Class<T> clazz) {
-        final String tableClassName = ReflectionUtil.getTableClassName(clazz);
-        final Table<? extends HasId> table = tables.get(tableClassName);
+    public static <T> void waitForPreload(@Nonnull Class<T> clazz) {
+        String tableClassName = ReflectionUtil.getTableClassName(clazz);
+        Table<? extends HasId> table = tables.get(tableClassName);
 
         if (table != null) {
             boolean preloadedNow = false;
@@ -194,20 +194,20 @@ public final class Inmemo {
                 }
             }
             if (preloadedNow) {
-                logger.info("Inmemo completed to wait for preload " + tableClassName + ".");
+                logger.info("Inmemo completed to wait for preload " + tableClassName + '.');
             }
         } else {
             throw new InmemoException("Unable to find table for class name `" + tableClassName + "`.");
         }
     }
 
-    private static <T extends HasId> void renewTable(final Class<T> clazz,
-                                                     final String indicatorField, final Object initialIndicatorValue,
-                                                     final Indices<T> indices) {
-        final Table<T> table = new Table<>(clazz, indicatorField);
+    private static <T extends HasId> void renewTable(Class<T> clazz,
+                                                     String indicatorField, Object initialIndicatorValue,
+                                                     Indices<T> indices) {
+        Table<T> table = new Table<>(clazz, indicatorField);
         table.createUpdater(initialIndicatorValue);
 
-        for (final Index<T, ?> index : indices.getIndices()) {
+        for (Index<T, ?> index : indices.getIndices()) {
             table.add(index);
         }
 
@@ -231,8 +231,8 @@ public final class Inmemo {
      */
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> List<T> find(
-            @Nonnull final Class<T> clazz,
-            @Nonnull final IndexConstraint<?> indexConstraint) {
+            @Nonnull Class<T> clazz,
+            @Nonnull IndexConstraint<?> indexConstraint) {
         return find(clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
     }
 
@@ -245,12 +245,12 @@ public final class Inmemo {
      */
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> List<T> find(
-            @Nonnull final Class<T> clazz,
-            @Nonnull final IndexConstraint<?> indexConstraint,
-            @Nonnull final Matcher<T> matcher) {
-        final String tableClassName = ReflectionUtil.getTableClassName(clazz);
+            @Nonnull Class<T> clazz,
+            @Nonnull IndexConstraint<?> indexConstraint,
+            @Nonnull Matcher<T> matcher) {
+        String tableClassName = ReflectionUtil.getTableClassName(clazz);
 
-        final Table<? extends HasId> table = tables.get(tableClassName);
+        Table<? extends HasId> table = tables.get(tableClassName);
         if (table == null) {
             throw new InmemoException("Unable to find table for class name `" + tableClassName + "`.");
         }
@@ -261,10 +261,10 @@ public final class Inmemo {
         }
 
         //noinspection rawtypes
-        final Matcher tableMatcher = table.convertMatcher(clazz, matcher);
+        Matcher tableMatcher = table.convertMatcher(clazz, matcher);
 
         //noinspection unchecked
-        final List<? extends HasId> result = table.find(indexConstraint, tableMatcher);
+        List<? extends HasId> result = table.find(indexConstraint, tableMatcher);
 
         if (result.isEmpty()) {
             return Collections.emptyList();
@@ -283,20 +283,20 @@ public final class Inmemo {
             if (false && sameClass) {
                 //This case does not work with multiple classloaders.
                 BeanCopier beanCopier = getBeanCopier(clazz, clazz);
-                final List<T> tableClassResult = new ArrayList<>(result.size());
+                List<T> tableClassResult = new ArrayList<>(result.size());
 
-                for (final HasId tableItem : result) {
-                    final T item = ReflectionUtil.newInstance(clazz);
+                for (HasId tableItem : result) {
+                    T item = ReflectionUtil.newInstance(clazz);
                     beanCopier.copy(tableItem, item, null);
                     tableClassResult.add(item);
                 }
 
                 return Collections.unmodifiableList(tableClassResult);
             } else {
-                final List<T> tableClassResult = new ArrayList<>(result.size());
+                List<T> tableClassResult = new ArrayList<>(result.size());
 
-                for (final HasId tableItem : result) {
-                    final T item = ReflectionUtil.newInstance(clazz);
+                for (HasId tableItem : result) {
+                    T item = ReflectionUtil.newInstance(clazz);
                     BeanUtils.copyProperties(tableItem, item);
                     tableClassResult.add(item);
                 }
@@ -315,9 +315,9 @@ public final class Inmemo {
      */
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> T findOnly(
-            final boolean throwOnNotUnique,
-            @Nonnull final Class<T> clazz,
-            @Nonnull final IndexConstraint<?> indexConstraint) {
+            boolean throwOnNotUnique,
+            @Nonnull Class<T> clazz,
+            @Nonnull IndexConstraint<?> indexConstraint) {
         return findOnly(throwOnNotUnique, clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
     }
 
@@ -331,13 +331,13 @@ public final class Inmemo {
      */
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> T findOnly(
-            final boolean throwOnNotUnique,
-            @Nonnull final Class<T> clazz,
-            @Nonnull final IndexConstraint<?> indexConstraint,
-            @Nonnull final Matcher<T> matcher) {
-        final String tableClassName = ReflectionUtil.getTableClassName(clazz);
+            boolean throwOnNotUnique,
+            @Nonnull Class<T> clazz,
+            @Nonnull IndexConstraint<?> indexConstraint,
+            @Nonnull Matcher<T> matcher) {
+        String tableClassName = ReflectionUtil.getTableClassName(clazz);
 
-        final Table<? extends HasId> table = tables.get(tableClassName);
+        Table<? extends HasId> table = tables.get(tableClassName);
         if (table == null) {
             throw new InmemoException("Unable to find table for class name `" + tableClassName + "`.");
         }
@@ -348,10 +348,10 @@ public final class Inmemo {
         }
 
         //noinspection rawtypes
-        final Matcher tableMatcher = table.convertMatcher(clazz, matcher);
+        Matcher tableMatcher = table.convertMatcher(clazz, matcher);
 
         //noinspection unchecked
-        final HasId result = table.findOnly(throwOnNotUnique, indexConstraint, tableMatcher);
+        HasId result = table.findOnly(throwOnNotUnique, indexConstraint, tableMatcher);
 
         if (result == null) {
             return null;
@@ -359,11 +359,11 @@ public final class Inmemo {
 
         if (false && result.getClass() == clazz) {
             //This case does not work with multiple classloaders.
-            final T item = ReflectionUtil.newInstance(clazz);
+            T item = ReflectionUtil.newInstance(clazz);
             getBeanCopier(clazz, clazz).copy(result, item, null);
             return item;
         } else {
-            final T item = ReflectionUtil.newInstance(clazz);
+            T item = ReflectionUtil.newInstance(clazz);
             BeanUtils.copyProperties(result, item);
             return item;
         }
@@ -377,8 +377,8 @@ public final class Inmemo {
      */
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> long findCount(
-            @Nonnull final Class<T> clazz,
-            @Nonnull final IndexConstraint<?> indexConstraint) {
+            @Nonnull Class<T> clazz,
+            @Nonnull IndexConstraint<?> indexConstraint) {
         return findCount(clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
     }
 
@@ -391,12 +391,12 @@ public final class Inmemo {
      */
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> long findCount(
-            @Nonnull final Class<T> clazz,
-            @Nonnull final IndexConstraint<?> indexConstraint,
-            @Nonnull final Matcher<T> matcher) {
-        final String tableClassName = ReflectionUtil.getTableClassName(clazz);
+            @Nonnull Class<T> clazz,
+            @Nonnull IndexConstraint<?> indexConstraint,
+            @Nonnull Matcher<T> matcher) {
+        String tableClassName = ReflectionUtil.getTableClassName(clazz);
 
-        final Table<? extends HasId> table = tables.get(tableClassName);
+        Table<? extends HasId> table = tables.get(tableClassName);
         if (table == null) {
             throw new InmemoException("Unable to find table for class name `" + tableClassName + "`.");
         }
@@ -407,15 +407,15 @@ public final class Inmemo {
         }
 
         //noinspection rawtypes
-        final Matcher tableMatcher = table.convertMatcher(clazz, matcher);
+        Matcher tableMatcher = table.convertMatcher(clazz, matcher);
 
         //noinspection unchecked
         return table.findCount(indexConstraint, tableMatcher);
     }
 
     private static <T extends HasId> Table<? extends HasId> getTableByClass(Class<T> clazz) {
-        final String tableClassName = ReflectionUtil.getTableClassName(clazz);
-        final Table<? extends HasId> table = tables.get(tableClassName);
+        String tableClassName = ReflectionUtil.getTableClassName(clazz);
+        Table<? extends HasId> table = tables.get(tableClassName);
         if (table == null) {
             throw new InmemoException("Unable to find table for class name `" + tableClassName + "`.");
         }
@@ -423,7 +423,7 @@ public final class Inmemo {
     }
 
     @SuppressWarnings("UnusedDeclaration")
-    public static <T extends HasId> void insertOrUpdate(@Nullable final T object) {
+    public static <T extends HasId> void insertOrUpdate(@Nullable T object) {
         if (object == null) {
             return;
         }
@@ -449,7 +449,7 @@ public final class Inmemo {
     }
 
     @SuppressWarnings("UnusedDeclaration")
-    public static void setDataSource(@Nonnull final DataSource dataSource) {
+    public static void setDataSource(@Nonnull DataSource dataSource) {
         TableUpdater.setDataSource(dataSource);
     }
 

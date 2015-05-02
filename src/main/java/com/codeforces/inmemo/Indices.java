@@ -13,15 +13,15 @@ public class Indices<T extends HasId> {
     private final List<RowListener> rowListeners = new ArrayList<>();
     private final List<ItemListener<T>> itemListeners = new ArrayList<>();
 
-    private void add(final Index<T, ?> index) {
+    private void add(Index<T, ?> index) {
         indices.add(index);
     }
 
-    private void add(final RowListener rowListener) {
+    private void add(RowListener rowListener) {
         rowListeners.add(rowListener);
     }
 
-    private void add(final ItemListener<T> itemListener) {
+    private void add(ItemListener<T> itemListener) {
         itemListeners.add(itemListener);
     }
 
@@ -42,30 +42,30 @@ public class Indices<T extends HasId> {
         private final Collection<RowListener> rowListeners = new ArrayList<>();
         private final Collection<ItemListener<T>> itemListeners = new ArrayList<>();
 
-        public <V> void add(final Index<T, V> index) {
+        public <V> void add(Index<T, V> index) {
             indices.add(index);
         }
 
-        public <V> void add(final RowListener rowListener) {
+        public <V> void add(RowListener rowListener) {
             rowListeners.add(rowListener);
         }
 
-        public <V> void add(final ItemListener<T> itemListener) {
+        public <V> void add(ItemListener<T> itemListener) {
             itemListeners.add(itemListener);
         }
 
         public Indices<T> build() {
-            final Indices<T> result = new Indices<>();
+            Indices<T> result = new Indices<>();
 
-            for (final Index<T, ?> index : indices) {
+            for (Index<T, ?> index : indices) {
                 result.add(index);
             }
 
-            for (final RowListener rowListener : rowListeners) {
+            for (RowListener rowListener : rowListeners) {
                 result.add(rowListener);
             }
 
-            for (final ItemListener<T> itemListener : itemListeners) {
+            for (ItemListener<T> itemListener : itemListeners) {
                 result.add(itemListener);
             }
 

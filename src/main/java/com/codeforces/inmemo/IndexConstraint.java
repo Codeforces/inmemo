@@ -7,7 +7,7 @@ public class IndexConstraint<V> {
     private final String indexName;
     private final V value;
 
-    public IndexConstraint(final String indexName, final V value) {
+    public IndexConstraint(String indexName, V value) {
         this.indexName = indexName;
         this.value = value;
     }
