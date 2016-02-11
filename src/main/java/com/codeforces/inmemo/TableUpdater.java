@@ -281,15 +281,15 @@ class TableUpdater<T extends HasId> {
             ));
         }
 
-        final int rowCount = rows.size();
-        if (rowCount == MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
-            logger.warn(String.format(
-                    "Suspicious row count while rescanning `%s` [rowCount=%d, queryTime=%d ms].",
-                    table.getClazz().getName(),
-                    MAX_ROWS_IN_SINGLE_SQL_STATEMENT,
-                    queryTimeMillis
-            ));
-        }
+//        final int rowCount = rows.size();
+//        if (rowCount == MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
+//            logger.warn(String.format(
+//                    "Suspicious row count while rescanning `%s` [rowCount=%d, queryTime=%d ms].",
+//                    table.getClazz().getName(),
+//                    MAX_ROWS_IN_SINGLE_SQL_STATEMENT,
+//                    queryTimeMillis
+//            ));
+//        }
 
         return rows;
     }
