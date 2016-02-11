@@ -2,6 +2,7 @@ package com.codeforces.inmemo;
 
 import net.sf.cglib.reflect.FastClass;
 
+import javax.annotation.Nonnull;
 import java.beans.BeanInfo;
 import java.beans.IntrospectionException;
 import java.beans.Introspector;
@@ -36,6 +37,7 @@ final class ReflectionUtil {
         }
     }
 
+    @Nonnull
     public static String getTableClassSpec(Class<?> clazz) {
         try {
             BeanInfo beanInfo = Introspector.getBeanInfo(clazz);

@@ -20,6 +20,7 @@ class TableUpdater<T extends HasId> {
     private static final Collection<TableUpdater<? extends HasId>> instances = new ArrayList<>();
 
     private final Table table;
+    private final boolean advancedLogging; // TODO remove
     private final Thread thread;
     private final String threadName;
     private volatile boolean running;
@@ -37,13 +38,14 @@ class TableUpdater<T extends HasId> {
 
     private final Collection<Long> lastUpdatedEntityIds = new HashSet<>();
 
-    TableUpdater(final Table<T> table, Object initialIndicatorValue) {
+    TableUpdater(Table<T> table, Object initialIndicatorValue) {
         if (dataSource == null) {
             logger.error("It should be called static Inmemo#setDataSource() before any instance of TableUpdater.");
             throw new InmemoException("It should be called static Inmemo#setDataSource() before any instance of TableUpdater.");
         }
 
         this.table = table;
+        this.advancedLogging = false; // "ContestParticipant".equals(table.getClazz().getSimpleName());
         this.lastIndicatorValue = initialIndicatorValue;
 
         jacuzzi = Jacuzzi.getJacuzzi(dataSource);
@@ -61,13 +63,13 @@ class TableUpdater<T extends HasId> {
     }
 
     @SuppressWarnings("UnusedDeclaration")
-    static void setDataSource(final DataSource dataSource) {
+    static void setDataSource(DataSource dataSource) {
         TableUpdater.dataSource = dataSource;
     }
 
     @SuppressWarnings("UnusedDeclaration")
     static void stop() {
-        for (final TableUpdater<? extends HasId> instance : instances) {
+        for (TableUpdater<? extends HasId> instance : instances) {
             instance.running = false;
         }
     }
@@ -88,12 +90,12 @@ class TableUpdater<T extends HasId> {
 
         if (rows.size() == 1) {
             Row row = rows.get(0);
-            final T entity = typeOracle.convertFromRow(row);
+            T entity = typeOracle.convertFromRow(row);
 
             table.insertOrUpdate(entity);
             table.insertOrUpdate(row);
         } else {
-            throw new InmemoException("Expected at most one item of " + table.getClazz() + " with id = " + id + ".");
+            throw new InmemoException("Expected at most one item of " + table.getClazz() + " with id = " + id + '.');
         }
     }
 
@@ -121,7 +123,7 @@ class TableUpdater<T extends HasId> {
 
         List<T> result = new ArrayList<>(rows.size());
         for (Row row : rows) {
-            final T entity = typeOracle.convertFromRow(row);
+            T entity = typeOracle.convertFromRow(row);
             logger.warn("Emergency found: " + table.getClazz().getName() + " id=" + entity.getId() + " [fields=" + formattedFields + "].");
 
             result.add(entity);
@@ -133,7 +135,7 @@ class TableUpdater<T extends HasId> {
         return result;
     }
 
-    private void validateFieldsArray(Object[] fields) {
+    private static void validateFieldsArray(Object[] fields) {
         if (fields.length % 2 != 0) {
             throw new IllegalArgumentException("EmergencyQueryFields array should have even length. Found: "
                     + Arrays.toString(fields) + '.');
@@ -151,22 +153,33 @@ class TableUpdater<T extends HasId> {
     private void update(Random timeSleepRandom) {
         long startTimeMillis = System.currentTimeMillis();
 
-        final List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
-        final long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
+        List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
+        long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
 
-        final Object previousIndicatorLastValue = lastIndicatorValue;
-        final boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
-        final List<Long> updatedIds = new ArrayList<>();
+        Object previousIndicatorLastValue = lastIndicatorValue;
+        boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
+        List<Long> updatedIds = new ArrayList<>();
 
-        for (final Row row : rows) {
+        if (advancedLogging) {
+            logger.warn(String.format(
+                    "UPDATE ContestParticipant (1): lastIndicatorValue=%s, rows.size=%d, hasInsertOrUpdateByRow=%b.",
+                    lastIndicatorValue, rows.size(), hasInsertOrUpdateByRow
+            ));
+        }
+
+        for (Row row : rows) {
             long id = getRowId(row);
             if (ObjectUtils.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
                     && lastUpdatedEntityIds.contains(id)) {
+                if (advancedLogging) {
+                    logger.warn(String.format("UPDATE ContestParticipant (2): row=%s.", row.entrySet()));
+                }
+
                 continue;
             }
 
             // Insert or update entity.
-            final T entity = typeOracle.convertFromRow(row);
+            T entity = typeOracle.convertFromRow(row);
             table.insertOrUpdate(entity);
 
             updatedIds.add(id);
@@ -179,6 +192,13 @@ class TableUpdater<T extends HasId> {
             lastIndicatorValue = row.get(table.getIndicatorField());
         }
 
+        if (advancedLogging) {
+            logger.warn(String.format(
+                    "UPDATE ContestParticipant (3): lastIndicatorValue=%s, updatedIds.size=%d.",
+                    lastIndicatorValue, updatedIds.size()
+            ));
+        }
+
         if (updatedIds.size() >= 10) {
             logger.info(String.format("Thread '%s' has found %s rows to update in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].", threadName,
                     rows.size(), afterGetRecentlyChangedRowsMillis - startTimeMillis));
@@ -187,11 +207,11 @@ class TableUpdater<T extends HasId> {
                 StringBuilder ids = new StringBuilder();
                 for (long id : updatedIds) {
                     if (ids.length() > 0) {
-                        ids.append(",");
+                        ids.append(',');
                     }
                     ids.append(id);
                 }
-                logger.info("Updated entries have id=" + ids + ".");
+                logger.info("Updated entries have id=" + ids + '.');
             }
 
             logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
@@ -200,12 +220,12 @@ class TableUpdater<T extends HasId> {
 
         if (updatedIds.isEmpty() && !table.isPreloaded()) {
             logger.info("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
-                    + " [items=" + table.size() + "] in " + (System.currentTimeMillis() - TableUpdater.this.startTimeMillis) + " ms.");
+                    + " [items=" + table.size() + "] in " + (System.currentTimeMillis() - this.startTimeMillis) + " ms.");
             table.setPreloaded(true);
         }
 
         lastUpdatedEntityIds.clear();
-        for (final Row row : rows) {
+        for (Row row : rows) {
             if (ObjectUtils.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
                 lastUpdatedEntityIds.add(getRowId(row));
             }
@@ -214,7 +234,7 @@ class TableUpdater<T extends HasId> {
         sleepBetweenRescans(timeSleepRandom, updatedIds.size());
     }
 
-    private long getRowId(Row row) {
+    private static long getRowId(Row row) {
         Long id = (Long) row.get("id");
         if (id == null) {
             id = (Long) row.get("ID");
@@ -222,7 +242,7 @@ class TableUpdater<T extends HasId> {
         return id;
     }
 
-    private void sleepBetweenRescans(final Random timeSleepRandom, final int updatedCount) {
+    private void sleepBetweenRescans(Random timeSleepRandom, int updatedCount) {
         if (updatedCount == 0) {
             sleep((4 * rescanTimeMillis / 5) + timeSleepRandom.nextInt((int) (rescanTimeMillis / 5)));
         } else if ((updatedCount << 1) > MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
@@ -234,7 +254,7 @@ class TableUpdater<T extends HasId> {
         }
     }
 
-    private void sleep(final long timeMillis) {
+    private void sleep(long timeMillis) {
         try {
             Thread.sleep(timeMillis);
         } catch (InterruptedException e) {
@@ -243,10 +263,10 @@ class TableUpdater<T extends HasId> {
         }
     }
 
-    private List<Row> getRecentlyChangedRows(final Object indicatorLastValue) {
-        final List<Row> rows;
-        final long startTimeMillis = System.currentTimeMillis();
-        final String forceIndexClause = table.getDatabaseIndex() == null ? "" : ("FORCE INDEX (" + table.getDatabaseIndex() + ")");
+    private List<Row> getRecentlyChangedRows(Object indicatorLastValue) {
+        List<Row> rows;
+        long startTimeMillis = System.currentTimeMillis();
+        String forceIndexClause = table.getDatabaseIndex() == null ? "" : ("FORCE INDEX (" + table.getDatabaseIndex() + ')');
 
         if (indicatorLastValue == null) {
             rows = jacuzzi.findRows(
@@ -273,7 +293,7 @@ class TableUpdater<T extends HasId> {
             );
         }
 
-        final long queryTimeMillis = System.currentTimeMillis() - startTimeMillis;
+        long queryTimeMillis = System.currentTimeMillis() - startTimeMillis;
         if (queryTimeMillis * 10 > rescanTimeMillis) {
             logger.warn(String.format(
                     "Rescanning query for entity `%s` took too long time %d ms.",
@@ -281,7 +301,7 @@ class TableUpdater<T extends HasId> {
             ));
         }
 
-//        final int rowCount = rows.size();
+//        int rowCount = rows.size();
 //        if (rowCount == MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
 //            logger.warn(String.format(
 //                    "Suspicious row count while rescanning `%s` [rowCount=%d, queryTime=%d ms].",
@@ -298,7 +318,7 @@ class TableUpdater<T extends HasId> {
         @Override
         public void run() {
             AttachConnectionHelper attachConnectionHelper = new AttachConnectionHelper();
-            Random sleepRandom = new Random();
+            @SuppressWarnings("UnsecureRandomNumberGeneration") Random sleepRandom = new Random();
 
             while (running) {
                 attachConnectionHelper.reattach();
@@ -322,14 +342,14 @@ class TableUpdater<T extends HasId> {
 
         private AttachConnectionHelper() {
             this.attachTimeMillis = System.currentTimeMillis();
-            logger.info("Initially attached connection for " + thread.getName() + ".");
+            logger.info("Initially attached connection for " + thread.getName() + '.');
             jacuzzi.attachConnection();
         }
 
         void reattach() {
             if (attachTimeMillis + ATTACH_TIME_MILLIS < System.currentTimeMillis()) {
                 attachTimeMillis = System.currentTimeMillis();
-                logger.info("Reattaching connection for " + thread.getName() + ".");
+                logger.info("Reattaching connection for " + thread.getName() + '.');
                 jacuzzi.detachConnection();
                 jacuzzi.attachConnection();
             }
