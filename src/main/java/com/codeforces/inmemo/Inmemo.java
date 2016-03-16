@@ -431,6 +431,15 @@ public final class Inmemo {
         getTableByClass(object.getClass()).insertOrUpdate(object);
     }
 
+    public static <T extends HasId> void update(Class<T> clazz) {
+        if (clazz == null) {
+            throw new IllegalArgumentException("Illegal arguments for Inmemo#update: "
+                    + "clazz = <null>");
+        }
+
+        getTableByClass(clazz).update();
+    }
+
     public static <T extends HasId> void insertOrUpdateByIds(Class<T> clazz, Long... ids) {
         if (clazz == null) {
             throw new IllegalArgumentException("Illegal arguments for Inmemo#insertOrUpdateByIds: "
@@ -482,5 +491,13 @@ public final class Inmemo {
             result = 31 * result + classB.hashCode();
             return result;
         }
+    }
+
+    public static void main(String[] args) throws IllegalAccessException, InstantiationException {
+        BeanCopier beanCopier = getBeanCopier(Person.class, Person.class);
+        Person from = null; // new Person(); // new Person(123, 124, 125, Person.A.Y);
+        Person to = Person.class.newInstance();
+        beanCopier.copy(from, to, null);
+        System.out.println(to);
     }
 }

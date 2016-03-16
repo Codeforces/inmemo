@@ -73,6 +73,7 @@ public class InmemoTest {
         {
             Assert.assertEquals(USER_COUNT, userDao.findAll().size());
         }
+        System.out.println(1);
 
         // Create table.
         {
@@ -99,11 +100,13 @@ public class InmemoTest {
                 }));
             }}.build(), true);
         }
+        System.out.println(2);
 
         // Assert size.
         {
             Assert.assertEquals(USER_COUNT, Inmemo.size(User.class));
         }
+        System.out.println(3);
 
         // Exactly one user with id=123.
         {
@@ -114,6 +117,7 @@ public class InmemoTest {
                 }
             }).size());
         }
+        System.out.println(4);
 
         // Tests that there is no user[id=USER_COUNT + 1], inserts it, waits, tests that the table contains it.
         {
@@ -135,6 +139,28 @@ public class InmemoTest {
                 }
             }).size());
         }
+        System.out.println(5);
+
+        // Tests that there is no user[id=USER_COUNT + 2], inserts it, enforces update, tests that the table contains it.
+        {
+            Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<User>() {
+                @Override
+                public boolean match(User user) {
+                    return true;
+                }
+            }).size());
+
+            userDao.insertRandom();
+            Inmemo.update(User.class);
+
+            Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<User>() {
+                @Override
+                public boolean match(User user) {
+                    return true;
+                }
+            }).size());
+        }
+        System.out.println(6);
 
         // Tests using second index that the number of users with first letter 'e' in handle is expected.
         {
@@ -155,6 +181,7 @@ public class InmemoTest {
             Assert.assertEquals(eUsers1, eUsers2);
             Assert.assertTrue(USER_COUNT / 26 / 2 <= eUsers1 && eUsers1 <= USER_COUNT / 26 * 2);
         }
+        System.out.println(7);
 
         // Tests matcher.
         {
@@ -167,6 +194,7 @@ public class InmemoTest {
 
             Assert.assertTrue(USER_COUNT / 26 / 26 / 3 <= xyUsers && xyUsers <= USER_COUNT / 26 / 26 * 3);
         }
+        System.out.println(8);
 
         // Tests that if we change user state in memory, it will no affect table unless we use insertOrUpdate.
         {
@@ -195,6 +223,7 @@ public class InmemoTest {
                 }
             }).get(0).getHandle()));
         }
+        System.out.println(9);
 
         // Tests that findOnly throws exception if non-unique and throwOnNotUnique parameter is true;
         {
@@ -236,6 +265,7 @@ public class InmemoTest {
             Assert.assertTrue(hasException);
 
         }
+        System.out.println(10);
 
         // Tests insertOrUpdateByIds method
         for (long i = 1; i <= USER_COUNT; i++) {
@@ -249,6 +279,7 @@ public class InmemoTest {
             User newUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", user.getId()));
             Assert.assertEquals(newHandle, newUser.getHandle());
         }
+        System.out.println(11);
     }
 
     @Test

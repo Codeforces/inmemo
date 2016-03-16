@@ -138,6 +138,12 @@ public class Table<T extends HasId> {
         }
     }
 
+    void update() {
+        if (tableUpdater != null) {
+            tableUpdater.update();
+        }
+    }
+
     void insertOrUpdate(Row row) {
         for (RowListener rowListener : rowListeners) {
             rowListener.insertOrUpdate(row);

@@ -8,6 +8,8 @@ import org.jacuzzi.core.TypeOracle;
 
 import javax.sql.DataSource;
 import java.util.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * @author MikeMirzayanov (mirzayanovmr@gmail.com)
@@ -15,6 +17,8 @@ import java.util.*;
 class TableUpdater<T extends HasId> {
     private static final Logger logger = Logger.getLogger(TableUpdater.class);
     private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 200_000;
+
+    private final Lock updateLock = new ReentrantLock();
 
     private static DataSource dataSource;
     private static final Collection<TableUpdater<? extends HasId>> instances = new ArrayList<>();
@@ -150,88 +154,104 @@ class TableUpdater<T extends HasId> {
         }
     }
 
+    void update() {
+        if (running) {
+            internalUpdate();
+        }
+    }
+
     private void update(Random timeSleepRandom) {
-        long startTimeMillis = System.currentTimeMillis();
-
-        List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
-        long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
-
-        Object previousIndicatorLastValue = lastIndicatorValue;
-        boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
-        List<Long> updatedIds = new ArrayList<>();
-
-        if (advancedLogging) {
-            logger.warn(String.format(
-                    "UPDATE ContestParticipant (1): lastIndicatorValue=%s, rows.size=%d, hasInsertOrUpdateByRow=%b.",
-                    lastIndicatorValue, rows.size(), hasInsertOrUpdateByRow
-            ));
-        }
-
-        for (Row row : rows) {
-            long id = getRowId(row);
-            if (ObjectUtils.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
-                    && lastUpdatedEntityIds.contains(id)) {
-                if (advancedLogging) {
-                    logger.warn(String.format("UPDATE ContestParticipant (2): row=%s.", row.entrySet()));
-                }
-
-                continue;
-            }
-
-            // Insert or update entity.
-            T entity = typeOracle.convertFromRow(row);
-            table.insertOrUpdate(entity);
-
-            updatedIds.add(id);
-
-            // Insert or update row.
-            if (hasInsertOrUpdateByRow) {
-                table.insertOrUpdate(row);
-            }
-
-            lastIndicatorValue = row.get(table.getIndicatorField());
-        }
-
-        if (advancedLogging) {
-            logger.warn(String.format(
-                    "UPDATE ContestParticipant (3): lastIndicatorValue=%s, updatedIds.size=%d.",
-                    lastIndicatorValue, updatedIds.size()
-            ));
-        }
-
-        if (updatedIds.size() >= 10) {
-            logger.info(String.format("Thread '%s' has found %s rows to update in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].", threadName,
-                    rows.size(), afterGetRecentlyChangedRowsMillis - startTimeMillis));
-
-            if (updatedIds.size() <= 100) {
-                StringBuilder ids = new StringBuilder();
-                for (long id : updatedIds) {
-                    if (ids.length() > 0) {
-                        ids.append(',');
-                    }
-                    ids.append(id);
-                }
-                logger.info("Updated entries have id=" + ids + '.');
-            }
-
-            logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
-                    threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
-        }
-
-        if (updatedIds.isEmpty() && !table.isPreloaded()) {
-            logger.info("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
-                    + " [items=" + table.size() + "] in " + (System.currentTimeMillis() - this.startTimeMillis) + " ms.");
-            table.setPreloaded(true);
-        }
-
-        lastUpdatedEntityIds.clear();
-        for (Row row : rows) {
-            if (ObjectUtils.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
-                lastUpdatedEntityIds.add(getRowId(row));
-            }
-        }
-
+        List<Long> updatedIds = internalUpdate();
         sleepBetweenRescans(timeSleepRandom, updatedIds.size());
+    }
+
+    private List<Long> internalUpdate() {
+        updateLock.lock();
+
+        try {
+            long startTimeMillis = System.currentTimeMillis();
+
+            List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
+            long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
+
+            Object previousIndicatorLastValue = lastIndicatorValue;
+            boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
+            List<Long> updatedIds = new ArrayList<>();
+
+            if (advancedLogging) {
+                logger.warn(String.format(
+                        "UPDATE ContestParticipant (1): lastIndicatorValue=%s, rows.size=%d, hasInsertOrUpdateByRow=%b.",
+                        lastIndicatorValue, rows.size(), hasInsertOrUpdateByRow
+                ));
+            }
+
+            for (Row row : rows) {
+                long id = getRowId(row);
+                if (ObjectUtils.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
+                        && lastUpdatedEntityIds.contains(id)) {
+                    if (advancedLogging) {
+                        logger.warn(String.format("UPDATE ContestParticipant (2): row=%s.", row.entrySet()));
+                    }
+
+                    continue;
+                }
+
+                // Insert or update entity.
+                T entity = typeOracle.convertFromRow(row);
+                table.insertOrUpdate(entity);
+
+                updatedIds.add(id);
+
+                // Insert or update row.
+                if (hasInsertOrUpdateByRow) {
+                    table.insertOrUpdate(row);
+                }
+
+                lastIndicatorValue = row.get(table.getIndicatorField());
+            }
+
+            if (advancedLogging) {
+                logger.warn(String.format(
+                        "UPDATE ContestParticipant (3): lastIndicatorValue=%s, updatedIds.size=%d.",
+                        lastIndicatorValue, updatedIds.size()
+                ));
+            }
+
+            if (updatedIds.size() >= 10) {
+                logger.info(String.format("Thread '%s' has found %s rows to update in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].", threadName,
+                        rows.size(), afterGetRecentlyChangedRowsMillis - startTimeMillis));
+
+                if (updatedIds.size() <= 100) {
+                    StringBuilder ids = new StringBuilder();
+                    for (long id : updatedIds) {
+                        if (ids.length() > 0) {
+                            ids.append(',');
+                        }
+                        ids.append(id);
+                    }
+                    logger.info("Updated entries have id=" + ids + '.');
+                }
+
+                logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
+                        threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
+            }
+
+            if (updatedIds.isEmpty() && !table.isPreloaded()) {
+                logger.info("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
+                        + " [items=" + table.size() + "] in " + (System.currentTimeMillis() - this.startTimeMillis) + " ms.");
+                table.setPreloaded(true);
+            }
+
+            lastUpdatedEntityIds.clear();
+            for (Row row : rows) {
+                if (ObjectUtils.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
+                    lastUpdatedEntityIds.add(getRowId(row));
+                }
+            }
+            return updatedIds;
+        } finally {
+            updateLock.unlock();
+        }
     }
 
     private static long getRowId(Row row) {
