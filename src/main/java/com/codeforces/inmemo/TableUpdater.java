@@ -17,6 +17,7 @@ import java.util.concurrent.locks.ReentrantLock;
 class TableUpdater<T extends HasId> {
     private static final Logger logger = Logger.getLogger(TableUpdater.class);
     private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 200_000;
+    private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 5;
 
     private final Lock updateLock = new ReentrantLock();
 
@@ -40,7 +41,7 @@ class TableUpdater<T extends HasId> {
      */
     private static final long rescanTimeMillis = 500;
 
-    private final Collection<Long> lastUpdatedEntityIds = new HashSet<>();
+    private final Map<Long, Integer> lastEntityIdsUpdateCount = new HashMap<>();
 
     TableUpdater(Table<T> table, Object initialIndicatorValue) {
         if (dataSource == null) {
@@ -188,7 +189,7 @@ class TableUpdater<T extends HasId> {
             for (Row row : rows) {
                 long id = getRowId(row);
                 if (ObjectUtils.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
-                        && lastUpdatedEntityIds.contains(id)) {
+                        && lastEntityIdsUpdateCount.containsKey(id) && lastEntityIdsUpdateCount.get(id) >= MAX_UPDATE_SAME_INDICATOR_TIMES) {
                     if (advancedLogging) {
                         logger.warn(String.format("UPDATE ContestParticipant (2): row=%s.", row.entrySet()));
                     }
@@ -242,10 +243,16 @@ class TableUpdater<T extends HasId> {
                 table.setPreloaded(true);
             }
 
-            lastUpdatedEntityIds.clear();
+            lastEntityIdsUpdateCount.clear();
             for (Row row : rows) {
                 if (ObjectUtils.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
-                    lastUpdatedEntityIds.add(getRowId(row));
+                    Integer updateCount = lastEntityIdsUpdateCount.get(getRowId(row));
+                    if (updateCount == null) {
+                        updateCount = 1;
+                    } else {
+                        updateCount += 1;
+                    }
+                    lastEntityIdsUpdateCount.put(getRowId(row), updateCount);
                 }
             }
             return updatedIds;
