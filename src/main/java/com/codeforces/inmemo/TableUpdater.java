@@ -243,11 +243,15 @@ class TableUpdater<T extends HasId> {
                 table.setPreloaded(true);
             }
 
-            lastEntityIdsUpdateCount.clear();
+            if (!ObjectUtils.equals(previousIndicatorLastValue, lastIndicatorValue)) {
+                lastEntityIdsUpdateCount.clear();
+            }
+            List<Long> trulyUpdatedIds = new ArrayList<>(updatedIds.size());
             for (Row row : rows) {
                 if (ObjectUtils.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
                     Integer updateCount = lastEntityIdsUpdateCount.get(getRowId(row));
                     if (updateCount == null) {
+                        trulyUpdatedIds.add(getRowId(row));
                         updateCount = 1;
                     } else {
                         updateCount += 1;
@@ -255,7 +259,7 @@ class TableUpdater<T extends HasId> {
                     lastEntityIdsUpdateCount.put(getRowId(row), updateCount);
                 }
             }
-            return updatedIds;
+            return trulyUpdatedIds;
         } finally {
             updateLock.unlock();
         }
