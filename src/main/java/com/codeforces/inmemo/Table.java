@@ -94,7 +94,7 @@ public class Table<T extends HasId> {
                 @Override
                 public boolean match(T tableItem) {
                     U otherItem = ReflectionUtil.newInstance(otherClass);
-                    BeanUtils.copyProperties(tableItem, otherItem);
+                    ReflectionUtil.copyProperties(tableItem, otherItem);
                     return otherMatcher.match(otherItem);
                 }
             };
@@ -130,7 +130,7 @@ public class Table<T extends HasId> {
 
         if (clazzSpec.equals(itemClassSpec)) {
             T tableItem = ReflectionUtil.newInstance(clazz);
-            BeanUtils.copyProperties(item, tableItem);
+            ReflectionUtil.copyProperties(item, tableItem);
             internalInsertOrUpdate(tableItem);
         } else {
             throw new InmemoException("Table class is incompatible with the class of object [tableClass=" + clazz

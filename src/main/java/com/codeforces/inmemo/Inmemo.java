@@ -2,12 +2,14 @@ package com.codeforces.inmemo;
 
 import net.sf.cglib.beans.BeanCopier;
 import org.apache.log4j.Logger;
-import org.springframework.beans.BeanUtils;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.sql.DataSource;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -297,7 +299,7 @@ public final class Inmemo {
 
                 for (HasId tableItem : result) {
                     T item = ReflectionUtil.newInstance(clazz);
-                    BeanUtils.copyProperties(tableItem, item);
+                    ReflectionUtil.copyProperties(tableItem, item);
                     tableClassResult.add(item);
                 }
 
@@ -364,7 +366,7 @@ public final class Inmemo {
             return item;
         } else {
             T item = ReflectionUtil.newInstance(clazz);
-            BeanUtils.copyProperties(result, item);
+            ReflectionUtil.copyProperties(result, item);
             return item;
         }
     }
