@@ -459,6 +459,10 @@ public final class Inmemo {
         getTableByClass(clazz).insertOrUpdateByIds(ids);
     }
 
+    public static void stopAllThreads() {
+        TableUpdater.stop();
+    }
+
     @SuppressWarnings("UnusedDeclaration")
     public static void setDataSource(@Nonnull DataSource dataSource) {
         TableUpdater.setDataSource(dataSource);

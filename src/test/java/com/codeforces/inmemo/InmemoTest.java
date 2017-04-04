@@ -6,7 +6,7 @@ import com.codeforces.inmemo.model.User;
 import com.codeforces.inmemo.model.Wrapper;
 import com.codeforces.inmemo.model.Wrapper.a;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
-import junit.framework.Assert;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -15,7 +15,9 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.core.Is.is;
 import static org.hamcrest.core.IsNot.not;
@@ -263,7 +265,6 @@ public class InmemoTest {
             }
 
             Assert.assertTrue(hasException);
-
         }
         System.out.println(10);
 
@@ -640,7 +641,7 @@ public class InmemoTest {
                                 return new Object[]{"id", id};
                             }
                         }
-                )
+                        )
                 );
 
                 add(Index.create("handle", String.class, new IndexGetter<User, String>() {
@@ -750,7 +751,7 @@ public class InmemoTest {
                             return new Object[]{"id", id};
                         }
                     }
-            )
+                    )
             );
 
             add(Index.create("handle", String.class, new IndexGetter<User, String>() {
