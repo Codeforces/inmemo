@@ -16,7 +16,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 class TableUpdater<T extends HasId> {
     private static final Logger logger = Logger.getLogger(TableUpdater.class);
-    private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 200_000;
+    private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 10_000_000;
     private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 5;
 
     private final Lock updateLock = new ReentrantLock();
