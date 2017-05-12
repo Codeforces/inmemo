@@ -1,6 +1,5 @@
 package com.codeforces.inmemo;
 
-import org.apache.commons.lang.ObjectUtils;
 import org.apache.log4j.Logger;
 import org.jacuzzi.core.Jacuzzi;
 import org.jacuzzi.core.Row;
@@ -16,7 +15,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 class TableUpdater<T extends HasId> {
     private static final Logger logger = Logger.getLogger(TableUpdater.class);
-    private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 200_000;
+    private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 10_000_000;
     private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 5;
 
     private final Lock updateLock = new ReentrantLock();
@@ -188,7 +187,7 @@ class TableUpdater<T extends HasId> {
 
             for (Row row : rows) {
                 long id = getRowId(row);
-                if (ObjectUtils.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
+                if (Objects.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
                         && lastEntityIdsUpdateCount.containsKey(id) && lastEntityIdsUpdateCount.get(id) >= MAX_UPDATE_SAME_INDICATOR_TIMES) {
                     if (advancedLogging) {
                         logger.warn(String.format("UPDATE ContestParticipant (2): row=%s.", row.entrySet()));
@@ -243,12 +242,12 @@ class TableUpdater<T extends HasId> {
                 table.setPreloaded(true);
             }
 
-            if (!ObjectUtils.equals(previousIndicatorLastValue, lastIndicatorValue)) {
+            if (!Objects.equals(previousIndicatorLastValue, lastIndicatorValue)) {
                 lastEntityIdsUpdateCount.clear();
             }
             List<Long> trulyUpdatedIds = new ArrayList<>(updatedIds.size());
             for (Row row : rows) {
-                if (ObjectUtils.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
+                if (Objects.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
                     Integer updateCount = lastEntityIdsUpdateCount.get(getRowId(row));
                     if (updateCount == null) {
                         trulyUpdatedIds.add(getRowId(row));

@@ -54,12 +54,7 @@ public final class Inmemo {
 
     @SuppressWarnings("UnusedDeclaration")
     public static <T extends HasId> Matcher<T> acceptAnyMatcher() {
-        return new Matcher<T>() {
-            @Override
-            public boolean match(T tableItem) {
-                return true;
-            }
-        };
+        return tableItem -> true;
     }
 
     @SuppressWarnings("UnusedDeclaration")
@@ -110,7 +105,7 @@ public final class Inmemo {
                     while (!table.isPreloaded()) {
                         try {
                             Thread.sleep(TimeUnit.SECONDS.toMillis(1));
-                        } catch (InterruptedException e) {
+                        } catch (InterruptedException ignored) {
                             break;
                         }
                     }
@@ -137,7 +132,7 @@ public final class Inmemo {
                     while (!table.isPreloaded()) {
                         try {
                             Thread.sleep(100L);
-                        } catch (InterruptedException e) {
+                        } catch (InterruptedException ignored) {
                             break;
                         }
                     }
@@ -191,7 +186,7 @@ public final class Inmemo {
                 preloadedNow = true;
                 try {
                     Thread.sleep(100L);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException ignored) {
                     break;
                 }
             }
@@ -235,7 +230,7 @@ public final class Inmemo {
     public static <T extends HasId> List<T> find(
             @Nonnull Class<T> clazz,
             @Nonnull IndexConstraint<?> indexConstraint) {
-        return find(clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
+        return find(clazz, indexConstraint, acceptAnyMatcher());
     }
 
     /**
@@ -320,7 +315,7 @@ public final class Inmemo {
             boolean throwOnNotUnique,
             @Nonnull Class<T> clazz,
             @Nonnull IndexConstraint<?> indexConstraint) {
-        return findOnly(throwOnNotUnique, clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
+        return findOnly(throwOnNotUnique, clazz, indexConstraint, acceptAnyMatcher());
     }
 
     /**
@@ -381,7 +376,7 @@ public final class Inmemo {
     public static <T extends HasId> long findCount(
             @Nonnull Class<T> clazz,
             @Nonnull IndexConstraint<?> indexConstraint) {
-        return findCount(clazz, indexConstraint, Inmemo.<T>acceptAnyMatcher());
+        return findCount(clazz, indexConstraint, acceptAnyMatcher());
     }
 
     /**
@@ -435,8 +430,7 @@ public final class Inmemo {
 
     public static <T extends HasId> void update(Class<T> clazz) {
         if (clazz == null) {
-            throw new IllegalArgumentException("Illegal arguments for Inmemo#update: "
-                    + "clazz = <null>");
+            throw new IllegalArgumentException("Illegal arguments for Inmemo#update: clazz = <null>");
         }
 
         getTableByClass(clazz).update();
@@ -444,12 +438,10 @@ public final class Inmemo {
 
     public static <T extends HasId> void insertOrUpdateByIds(Class<T> clazz, Long... ids) {
         if (clazz == null) {
-            throw new IllegalArgumentException("Illegal arguments for Inmemo#insertOrUpdateByIds: "
-                    + "clazz = <null>");
+            throw new IllegalArgumentException("Illegal arguments for Inmemo#insertOrUpdateByIds: clazz = <null>");
         }
         if (ids == null) {
-            throw new IllegalArgumentException("Illegal arguments for Inmemo#insertOrUpdateByIds: "
-                    + "ids = <null>");
+            throw new IllegalArgumentException("Illegal arguments for Inmemo#insertOrUpdateByIds: ids = <null>");
         }
 
         if (ids.length == 0) {
@@ -457,6 +449,14 @@ public final class Inmemo {
         }
 
         getTableByClass(clazz).insertOrUpdateByIds(ids);
+    }
+
+    /**
+     * Sends shutdown signal to all Inmemo background threads. There is no guarantee, that all threads are completely
+     * stopped, when this method finishes.
+     */
+    public static void stopAllThreads() {
+        TableUpdater.stop();
     }
 
     @SuppressWarnings("UnusedDeclaration")
