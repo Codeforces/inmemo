@@ -54,7 +54,8 @@ public class InmemoTest {
                 "ADMIN BOOLEAN, " +
                 "CREATIONTIME TIMESTAMP, " +
                 "LASTONLINETIME TIMESTAMP, " +
-                "DISABLED BOOLEAN" +
+                "DISABLED BOOLEAN," +
+                "TSHIRTSIZE VARCHAR(255) " +
                 ')'
         );
 
@@ -63,6 +64,38 @@ public class InmemoTest {
         }
 
         Inmemo.setDataSource(dataSource);
+    }
+
+    @Test
+    public void testEnumField() throws InterruptedException {
+        Inmemo.dropTableIfExists(User.class);
+
+        // Create table.
+        {
+            Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
+                add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
+                    @Override
+                    public Long get(User tableItem) {
+                        return tableItem.getId();
+                    }
+                }));
+            }}.build(), true);
+        }
+
+        Map<Long, User> users = new HashMap<>();
+        for (User.TShirtSize tShirtSize : User.TShirtSize.values()) {
+            User user = userDao.newRandomUser();
+            user.setTShirtSize(tShirtSize);
+            userDao.insert(user);
+            users.put(user.getId(), user);
+        }
+
+        Thread.sleep(BASE_SLEEP_MS);
+
+        for (Map.Entry<Long, User> entry : users.entrySet()) {
+            User inmemoUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", entry.getKey()));
+            org.junit.Assert.assertEquals(entry.getValue().getTShirtSize(), inmemoUser.getTShirtSize());
+        }
     }
 
     @Test

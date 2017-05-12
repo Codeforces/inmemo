@@ -17,6 +17,7 @@ public class User implements HasId {
     private Date creationTime;
     private Date lastOnlineTime;
     private boolean disabled;
+    private TShirtSize tShirtSize;
 
     public long getId() {
         return id;
@@ -90,6 +91,14 @@ public class User implements HasId {
         this.disabled = disabled;
     }
 
+    public TShirtSize getTShirtSize() {
+        return tShirtSize;
+    }
+
+    public void setTShirtSize(TShirtSize tShirtSize) {
+        this.tShirtSize = tShirtSize;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -97,18 +106,18 @@ public class User implements HasId {
 
         User user = (User) o;
 
+        if (id != user.id) return false;
         if (admin != user.admin) return false;
         if (disabled != user.disabled) return false;
-        if (id != user.id) return false;
-        if (creationTime != null ? !creationTime.equals(user.creationTime) : user.creationTime != null) return false;
-        if (email != null ? !email.equals(user.email) : user.email != null) return false;
         if (handle != null ? !handle.equals(user.handle) : user.handle != null) return false;
+        if (openId != null ? !openId.equals(user.openId) : user.openId != null) return false;
+        if (email != null ? !email.equals(user.email) : user.email != null) return false;
+        if (password != null ? !password.equals(user.password) : user.password != null) return false;
+        if (creationTime != null ? !creationTime.equals(user.creationTime) : user.creationTime != null) return false;
         if (lastOnlineTime != null ? !lastOnlineTime.equals(user.lastOnlineTime) : user.lastOnlineTime != null)
             return false;
-        if (openId != null ? !openId.equals(user.openId) : user.openId != null) return false;
-        if (password != null ? !password.equals(user.password) : user.password != null) return false;
+        return tShirtSize == user.tShirtSize;
 
-        return true;
     }
 
     @Override
@@ -122,6 +131,42 @@ public class User implements HasId {
         result = 31 * result + (creationTime != null ? creationTime.hashCode() : 0);
         result = 31 * result + (lastOnlineTime != null ? lastOnlineTime.hashCode() : 0);
         result = 31 * result + (disabled ? 1 : 0);
+        result = 31 * result + (tShirtSize != null ? tShirtSize.hashCode() : 0);
         return result;
+    }
+
+    @Override
+    public String toString() {
+        return "User{" +
+                "id=" + id +
+                ", handle='" + handle + '\'' +
+                ", openId='" + openId + '\'' +
+                ", email='" + email + '\'' +
+                ", password='" + password + '\'' +
+                ", admin=" + admin +
+                ", creationTime=" + creationTime +
+                ", lastOnlineTime=" + lastOnlineTime +
+                ", disabled=" + disabled +
+                ", tShirtSize=" + tShirtSize +
+                '}';
+    }
+
+    public enum TShirtSize {
+        XS,
+        S,
+        M,
+        L,
+        XL,
+        XXL,
+        XXXL,
+        XXXXL,
+        XXXXXL,
+        WXXS,
+        WXS,
+        WS,
+        WM,
+        WL,
+        WXL,
+        WXXL
     }
 }
