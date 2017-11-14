@@ -425,7 +425,7 @@ public final class Inmemo {
             return;
         }
 
-        getTableByClass(object.getClass()).insertOrUpdate(object);
+        getTableByClass(object.getClass()).insertOrUpdate(object, null);
     }
 
     public static <T extends HasId> void update(Class<T> clazz) {

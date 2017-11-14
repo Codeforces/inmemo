@@ -328,19 +328,8 @@ public class InmemoTest {
         // Create table.
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
-                    @Override
-                    public Long get(User tableItem) {
-                        return tableItem.getId();
-                    }
-                }));
-
-                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User tableItem) {
-                        return tableItem.getHandle().substring(0, 1);
-                    }
-                }));
+                add(Index.create("ID", Long.class, User::getId));
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, user -> user.getHandle().substring(0, 1)));
             }}.build(), true);
         }
 
@@ -351,71 +340,42 @@ public class InmemoTest {
 //            }
 //        }));
 
-        Assert.assertEquals(1, Inmemo.findCount(Wrapper.a.class, new IndexConstraint<Object>("ID", 11L), new Matcher<Wrapper.a>() {
-            @Override
-            public boolean match(Wrapper.a tableItem) {
-                return true;
-            }
-        }));
+        Assert.assertEquals(1, Inmemo.findCount(Wrapper.a.class, new IndexConstraint<Object>("ID", 11L), user -> true));
 
         // Tests that there is no user[id=USER_COUNT + 1], inserts it, waits, tests that the table contains it.
         {
-            List<a> users = Inmemo.find(a.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<a>() {
-                @Override
-                public boolean match(a user) {
-                    return true;
-                }
-            });
-
+            List<a> users = Inmemo.find(a.class,
+                    new IndexConstraint<>("ID", USER_COUNT + 1), user -> true);
             if (users.size() != 0) {
                 System.out.println(users);
             }
 
-            Assert.assertEquals(0, Inmemo.find(Wrapper.a.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<Wrapper.a>() {
-                @Override
-                public boolean match(Wrapper.a user) {
-                    return true;
-                }
-            }).size());
+            Assert.assertEquals(0, Inmemo.find(Wrapper.a.class,
+                    new IndexConstraint<>("ID", USER_COUNT + 1), user -> true).size());
 
             userDao.insertRandom();
             Thread.sleep(BASE_SLEEP_MS);
-
-            Assert.assertEquals(1, Inmemo.find(Wrapper.a.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<Wrapper.a>() {
-                @Override
-                public boolean match(Wrapper.a user) {
-                    return true;
-                }
-            }).size());
+            Assert.assertEquals(1, Inmemo.find(Wrapper.a.class,
+                    new IndexConstraint<>("ID", USER_COUNT + 1), user -> true).size());
         }
 
         // Tests that there is no user[id=USER_COUNT + 2], inserts it, waits, tests that the table contains it.
         {
-            Assert.assertEquals(0, Inmemo.find(Wrapper.a.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<Wrapper.a>() {
-                @Override
-                public boolean match(Wrapper.a user) {
-                    return true;
-                }
-            }).size());
+            Assert.assertEquals(0, Inmemo.find(Wrapper.a.class,
+                    new IndexConstraint<>("ID", USER_COUNT + 2), user -> true).size());
 
             a x = new a();
             x.setId(USER_COUNT + 2);
             x.setHandle("aa");
             Inmemo.insertOrUpdate(x);
 
-            Assert.assertEquals(1, Inmemo.find(Wrapper.a.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<Wrapper.a>() {
-                @Override
-                public boolean match(Wrapper.a user) {
-                    return true;
-                }
-            }).size());
+            Assert.assertEquals(1, Inmemo.find(Wrapper.a.class,
+                    new IndexConstraint<>("ID", USER_COUNT + 2), user -> true).size());
 
-            Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return user.getPassword() == null;
-                }
-            }).size());
+            Assert.assertEquals(1,
+                    Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), user -> user.getPassword() == null).size());
+            Assert.assertEquals(0,
+                    Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), user -> user.getPassword() != null).size());
         }
     }
 
@@ -852,6 +812,29 @@ public class InmemoTest {
             Assert.assertTrue(executorService.awaitTermination(10, TimeUnit.SECONDS));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    @Test
+    public void testJournal() {
+        System.setProperty("Inmemo.UseJournal", "true");
+
+        try {
+            Inmemo.dropTableIfExists(User.class);
+
+            // Create table.
+            {
+                Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
+                    add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
+                        @Override
+                        public Long get(User tableItem) {
+                            return tableItem.getId();
+                        }
+                    }));
+                }}.build(), true);
+            }
+        } finally {
+            System.setProperty("Inmemo.UseJournal", "false");
         }
     }
 }

@@ -6,7 +6,9 @@ import org.jacuzzi.core.Row;
 import org.jacuzzi.core.TypeOracle;
 
 import javax.sql.DataSource;
+import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -15,7 +17,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 class TableUpdater<T extends HasId> {
     private static final Logger logger = Logger.getLogger(TableUpdater.class);
-    private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 10_000_000;
+    private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 1_750_000;
     private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 5;
 
     private final Lock updateLock = new ReentrantLock();
@@ -96,7 +98,7 @@ class TableUpdater<T extends HasId> {
             Row row = rows.get(0);
             T entity = typeOracle.convertFromRow(row);
 
-            table.insertOrUpdate(entity);
+            table.insertOrUpdate(entity, row);
             table.insertOrUpdate(row);
         } else {
             throw new InmemoException("Expected at most one item of " + table.getClazz() + " with id = " + id + '.');
@@ -132,7 +134,7 @@ class TableUpdater<T extends HasId> {
 
             result.add(entity);
 
-            table.insertOrUpdate(entity);
+            table.insertOrUpdate(entity, row);
             table.insertOrUpdate(row);
         }
 
@@ -170,9 +172,17 @@ class TableUpdater<T extends HasId> {
 
         try {
             long startTimeMillis = System.currentTimeMillis();
-
             List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
+
             long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
+            long getRecentlyChangedMillis = afterGetRecentlyChangedRowsMillis - startTimeMillis;
+
+            if (rows.size() >= 100 || getRecentlyChangedMillis >= TimeUnit.SECONDS.toMillis(1)) {
+                logger.warn("Table '" + table.getClazz().getSimpleName() + "': getRecentlyChangedRows returns " + rows.size()
+                        + " rows [lastIndicatorValue=" + lastIndicatorValue
+                        + ", thread=" + threadName
+                        + ", time=" + getRecentlyChangedMillis + " ms].");
+            }
 
             Object previousIndicatorLastValue = lastIndicatorValue;
             boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
@@ -198,7 +208,7 @@ class TableUpdater<T extends HasId> {
 
                 // Insert or update entity.
                 T entity = typeOracle.convertFromRow(row);
-                table.insertOrUpdate(entity);
+                table.insertOrUpdate(entity, row);
 
                 updatedIds.add(id);
 
@@ -219,7 +229,7 @@ class TableUpdater<T extends HasId> {
 
             if (updatedIds.size() >= 10) {
                 logger.info(String.format("Thread '%s' has found %s rows to update in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].", threadName,
-                        rows.size(), afterGetRecentlyChangedRowsMillis - startTimeMillis));
+                        rows.size(), getRecentlyChangedMillis));
 
                 if (updatedIds.size() <= 100) {
                     StringBuilder ids = new StringBuilder();
@@ -237,8 +247,20 @@ class TableUpdater<T extends HasId> {
             }
 
             if (updatedIds.isEmpty() && !table.isPreloaded()) {
-                logger.info("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
-                        + " [items=" + table.size() + "] in " + (System.currentTimeMillis() - this.startTimeMillis) + " ms.");
+                long totalTimeMillis = System.currentTimeMillis() - this.startTimeMillis;
+                try {
+                    table.writeJournal();
+                } catch (IOException e) {
+                    logger.error("Inmemo failed to dump journal of table " + ReflectionUtil.getTableClassName(table.getClazz())
+                            + " [items=" + table.size() + "] in " + totalTimeMillis + " ms.", e);
+                }
+                if (totalTimeMillis < TimeUnit.SECONDS.toMillis(1)) {
+                    logger.info("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
+                            + " [items=" + table.size() + "] in " + totalTimeMillis + " ms.");
+                } else {
+                    logger.warn("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
+                            + " [items=" + table.size() + "] in " + totalTimeMillis + " ms.");
+                }
                 table.setPreloaded(true);
             }
 
@@ -294,8 +316,24 @@ class TableUpdater<T extends HasId> {
     }
 
     private List<Row> getRecentlyChangedRows(Object indicatorLastValue) {
-        List<Row> rows;
         long startTimeMillis = System.currentTimeMillis();
+        List<Row> rows = null;
+
+        if (lastIndicatorValue == null && table.isUseJournal()) {
+            //noinspection unchecked
+            List<Row> journalRows = table.readJournal();
+            if (journalRows != null) {
+                rows = journalRows;
+            }
+        }
+
+        if (rows != null) {
+            logger.info("getRecentlyChangedRows loads data using the journal in "
+                    + (System.currentTimeMillis() - startTimeMillis)
+                    + " ms [table=" + table.getClazz().getSimpleName() + "].");
+            return rows;
+        }
+
         String forceIndexClause = table.getDatabaseIndex() == null ? "" : ("FORCE INDEX (" + table.getDatabaseIndex() + ')');
 
         if (indicatorLastValue == null) {
@@ -385,7 +423,7 @@ class TableUpdater<T extends HasId> {
             }
         }
 
-        public void stop() {
+        void stop() {
             jacuzzi.detachConnection();
         }
     }
