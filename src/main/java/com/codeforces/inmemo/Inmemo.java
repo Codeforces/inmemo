@@ -464,6 +464,10 @@ public final class Inmemo {
         TableUpdater.setDataSource(dataSource);
     }
 
+    public static void setSpecificDataSource(Class<?> clazz, @Nonnull DataSource dataSource) {
+        TableUpdater.setSpecificDataSource(clazz, dataSource);
+    }
+
     private static final class ClassPair {
         private final Class<?> classA;
         private final Class<?> classB;

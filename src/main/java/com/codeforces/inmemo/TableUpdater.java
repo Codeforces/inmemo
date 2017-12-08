@@ -3,11 +3,14 @@ package com.codeforces.inmemo;
 import org.apache.log4j.Logger;
 import org.jacuzzi.core.Jacuzzi;
 import org.jacuzzi.core.Row;
+import org.jacuzzi.core.RowRoll;
 import org.jacuzzi.core.TypeOracle;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.security.spec.DSAGenParameterSpec;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -23,6 +26,7 @@ class TableUpdater<T extends HasId> {
     private final Lock updateLock = new ReentrantLock();
 
     private static DataSource dataSource;
+    private static Map<String, DataSource> dataSourceByClazzName = new ConcurrentHashMap<>();
     private static final Collection<TableUpdater<? extends HasId>> instances = new ArrayList<>();
 
     private final Table table;
@@ -54,14 +58,16 @@ class TableUpdater<T extends HasId> {
         this.advancedLogging = false; // "ContestParticipant".equals(table.getClazz().getSimpleName());
         this.lastIndicatorValue = initialIndicatorValue;
 
-        jacuzzi = Jacuzzi.getJacuzzi(dataSource);
+        DataSource clazzDataSource = dataSourceByClazzName.get(table.getClazz().getName());
+        jacuzzi = Jacuzzi.getJacuzzi(clazzDataSource == null ? dataSource : clazzDataSource);
+
         typeOracle = TypeOracle.getTypeOracle(table.getClazz());
 
         threadName = "InmemoUpdater#" + table.getClazz();
         thread = new Thread(new TableUpdaterRunnable(), threadName);
         thread.setDaemon(true);
 
-        logger.info("Started Inmemo table updater thread '" + threadName + "'.");
+        logger.error("Started Inmemo table updater thread '" + threadName + "'.");
         startTimeMillis = System.currentTimeMillis();
 
         //noinspection ThisEscapedInObjectConstruction
@@ -86,7 +92,7 @@ class TableUpdater<T extends HasId> {
     }
 
     void insertOrUpdateById(Long id) {
-        List<Row> rows = jacuzzi.findRows(String.format("SELECT * FROM %s WHERE %s = %s",
+        RowRoll rows = jacuzzi.findRowRoll(String.format("SELECT * FROM %s WHERE %s = %s",
                 typeOracle.getTableName(), typeOracle.getIdColumn(), id.toString()
         ));
 
@@ -95,7 +101,7 @@ class TableUpdater<T extends HasId> {
         }
 
         if (rows.size() == 1) {
-            Row row = rows.get(0);
+            Row row = rows.getRow(0);
             T entity = typeOracle.convertFromRow(row);
 
             table.insertOrUpdate(entity, row);
@@ -118,7 +124,7 @@ class TableUpdater<T extends HasId> {
 
         String formattedFields = typeOracle.getQueryFindSql(fieldNames);
 
-        List<Row> rows = jacuzzi.findRows(String.format("SELECT * FROM %s WHERE %s ORDER BY %s",
+        RowRoll rows = jacuzzi.findRowRoll(String.format("SELECT * FROM %s WHERE %s ORDER BY %s",
                 typeOracle.getTableName(), formattedFields, typeOracle.getIdColumn()), fieldValues);
 
         if (rows == null || rows.isEmpty()) {
@@ -128,7 +134,9 @@ class TableUpdater<T extends HasId> {
         logger.warn("Emergency case: found " + rows.size() + " items of class " + table.getClazz().getName() + " [fields=" + formattedFields + "].");
 
         List<T> result = new ArrayList<>(rows.size());
-        for (Row row : rows) {
+        for (int i = 0; i < rows.size(); i++) {
+            Row row = rows.getRow(i);
+
             T entity = typeOracle.convertFromRow(row);
             logger.warn("Emergency found: " + table.getClazz().getName() + " id=" + entity.getId() + " [fields=" + formattedFields + "].");
 
@@ -172,13 +180,18 @@ class TableUpdater<T extends HasId> {
 
         try {
             long startTimeMillis = System.currentTimeMillis();
-            List<Row> rows = getRecentlyChangedRows(lastIndicatorValue);
+            RowRoll rows = getRecentlyChangedRows(lastIndicatorValue);
 
             long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
             long getRecentlyChangedMillis = afterGetRecentlyChangedRowsMillis - startTimeMillis;
 
             if (rows.size() >= 100 || getRecentlyChangedMillis >= TimeUnit.SECONDS.toMillis(1)) {
-                logger.warn("Table '" + table.getClazz().getSimpleName() + "': getRecentlyChangedRows returns " + rows.size()
+                logger.error("Table '" + table.getClazz().getSimpleName() + "': getRecentlyChangedRows returns " + rows.size()
+                        + " rows [lastIndicatorValue=" + lastIndicatorValue
+                        + ", thread=" + threadName
+                        + ", time=" + getRecentlyChangedMillis + " ms].");
+            } else if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
+                logger.error("Table '" + table.getClazz().getSimpleName() + "': getRecentlyChangedRows returns " + rows.size()
                         + " rows [lastIndicatorValue=" + lastIndicatorValue
                         + ", thread=" + threadName
                         + ", time=" + getRecentlyChangedMillis + " ms].");
@@ -188,6 +201,13 @@ class TableUpdater<T extends HasId> {
             boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
             List<Long> updatedIds = new ArrayList<>();
 
+            if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
+                logger.error(String.format(
+                        "UPDATE ContestParticipant (1): lastIndicatorValue=%s, rows.size=%d, hasInsertOrUpdateByRow=%b.",
+                        lastIndicatorValue, rows.size(), hasInsertOrUpdateByRow
+                ));
+            }
+
             if (advancedLogging) {
                 logger.warn(String.format(
                         "UPDATE ContestParticipant (1): lastIndicatorValue=%s, rows.size=%d, hasInsertOrUpdateByRow=%b.",
@@ -195,18 +215,19 @@ class TableUpdater<T extends HasId> {
                 ));
             }
 
-            for (Row row : rows) {
-                long id = getRowId(row);
-                if (Objects.equals(row.get(table.getIndicatorField()), previousIndicatorLastValue)
-                        && lastEntityIdsUpdateCount.containsKey(id) && lastEntityIdsUpdateCount.get(id) >= MAX_UPDATE_SAME_INDICATOR_TIMES) {
-                    if (advancedLogging) {
-                        logger.warn(String.format("UPDATE ContestParticipant (2): row=%s.", row.entrySet()));
-                    }
+            int idColumn = getIdColumn(rows);
+            int indicatorFieldColumn = rows.getColumn(table.getIndicatorField());
 
+            for (int i = 0; i < rows.size(); i++) {
+                long id = (long) rows.getValue(i, idColumn);
+
+                if (Objects.equals(rows.getValue(i, indicatorFieldColumn), previousIndicatorLastValue)
+                        && lastEntityIdsUpdateCount.containsKey(id) && lastEntityIdsUpdateCount.get(id) >= MAX_UPDATE_SAME_INDICATOR_TIMES) {
                     continue;
                 }
 
                 // Insert or update entity.
+                Row row = rows.getRow(i);
                 T entity = typeOracle.convertFromRow(row);
                 table.insertOrUpdate(entity, row);
 
@@ -217,7 +238,23 @@ class TableUpdater<T extends HasId> {
                     table.insertOrUpdate(row);
                 }
 
+                if (i > 0 && i % 100000 == 0) {
+                    logger.warn("Inserted " + i + " rows in a batch [table=" + table.getClazz().getSimpleName() + "].");
+                }
+
+                int tableSize = table.size();
+                if (tableSize > 0 && tableSize % 100000 == 0) {
+                    logger.warn("Table " + table.getClazz().getSimpleName() + " contains now " + tableSize + " rows.");
+                }
+
                 lastIndicatorValue = row.get(table.getIndicatorField());
+            }
+
+            if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
+                logger.error(String.format(
+                        "UPDATE ContestParticipant (3): lastIndicatorValue=%s, updatedIds.size=%d.",
+                        lastIndicatorValue, updatedIds.size()
+                ));
             }
 
             if (advancedLogging) {
@@ -240,13 +277,32 @@ class TableUpdater<T extends HasId> {
                         ids.append(id);
                     }
                     logger.info("Updated entries have id=" + ids + '.');
+                    if (table.getClazz().getSimpleName().equals("ContestParticipant")) {
+                        logger.error("Updated entries have id=" + ids + '.');
+                    }
                 }
 
-                logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
-                        threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
+                if (!updatedIds.isEmpty()) {
+                    logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
+                            threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
+                    if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
+                        logger.error(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
+                                threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
+                    }
+                }
+            }
+
+            if (!updatedIds.isEmpty()) {
+                if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
+                    logger.error(String.format("Thread '%s' has updated %d items in %d ms [" + table.isPreloaded()
+                                    + ", lastIndicatorValue=" + lastIndicatorValue + "].",
+                            threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
+                }
             }
 
             if (updatedIds.isEmpty() && !table.isPreloaded()) {
+                logger.error("Inmemo ready to dump journal of table " + ReflectionUtil.getTableClassName(table.getClazz())
+                        + " [items=" + table.size() + "].");
                 long totalTimeMillis = System.currentTimeMillis() - this.startTimeMillis;
                 try {
                     table.writeJournal();
@@ -268,16 +324,18 @@ class TableUpdater<T extends HasId> {
                 lastEntityIdsUpdateCount.clear();
             }
             List<Long> trulyUpdatedIds = new ArrayList<>(updatedIds.size());
-            for (Row row : rows) {
-                if (Objects.equals(row.get(table.getIndicatorField()), lastIndicatorValue)) {
-                    Integer updateCount = lastEntityIdsUpdateCount.get(getRowId(row));
+
+            for (int i = 0; i < rows.size(); i++) {
+                if (Objects.equals(rows.getValue(i, indicatorFieldColumn), lastIndicatorValue)) {
+                    long id = (long) rows.getValue(i, idColumn);
+                    Integer updateCount = lastEntityIdsUpdateCount.get(id);
                     if (updateCount == null) {
-                        trulyUpdatedIds.add(getRowId(row));
+                        trulyUpdatedIds.add(id);
                         updateCount = 1;
                     } else {
                         updateCount += 1;
                     }
-                    lastEntityIdsUpdateCount.put(getRowId(row), updateCount);
+                    lastEntityIdsUpdateCount.put(id, updateCount);
                 }
             }
             return trulyUpdatedIds;
@@ -286,12 +344,12 @@ class TableUpdater<T extends HasId> {
         }
     }
 
-    private static long getRowId(Row row) {
-        Long id = (Long) row.get("id");
-        if (id == null) {
-            id = (Long) row.get("ID");
+    private static int getIdColumn(RowRoll rowRoll) {
+        int column = rowRoll.getColumn("id");
+        if (column == -1) {
+            column = rowRoll.getColumn("ID");
         }
-        return id;
+        return column;
     }
 
     private void sleepBetweenRescans(Random timeSleepRandom, int updatedCount) {
@@ -315,20 +373,20 @@ class TableUpdater<T extends HasId> {
         }
     }
 
-    private List<Row> getRecentlyChangedRows(Object indicatorLastValue) {
+    private RowRoll getRecentlyChangedRows(Object indicatorLastValue) {
         long startTimeMillis = System.currentTimeMillis();
-        List<Row> rows = null;
+        RowRoll rows = null;
 
         if (lastIndicatorValue == null && table.isUseJournal()) {
             //noinspection unchecked
-            List<Row> journalRows = table.readJournal();
-            if (journalRows != null) {
+            RowRoll journalRows = table.readJournal();
+            if (journalRows != null && !journalRows.isEmpty()) {
                 rows = journalRows;
             }
         }
 
         if (rows != null) {
-            logger.info("getRecentlyChangedRows loads data using the journal in "
+                logger.error("getRecentlyChangedRows loads data of using the journal in "
                     + (System.currentTimeMillis() - startTimeMillis)
                     + " ms [table=" + table.getClazz().getSimpleName() + "].");
             return rows;
@@ -337,7 +395,7 @@ class TableUpdater<T extends HasId> {
         String forceIndexClause = table.getDatabaseIndex() == null ? "" : ("FORCE INDEX (" + table.getDatabaseIndex() + ')');
 
         if (indicatorLastValue == null) {
-            rows = jacuzzi.findRows(
+            rows = jacuzzi.findRowRoll(
                     String.format(
                             "SELECT * FROM %s %s ORDER BY %s, %s LIMIT %d",
                             typeOracle.getTableName(),
@@ -348,7 +406,7 @@ class TableUpdater<T extends HasId> {
                     )
             );
         } else {
-            rows = jacuzzi.findRows(
+            rows = jacuzzi.findRowRoll(
                     String.format(
                             "SELECT * FROM %s %s WHERE %s >= ? ORDER BY %s, %s LIMIT %d",
                             typeOracle.getTableName(),
@@ -382,14 +440,20 @@ class TableUpdater<T extends HasId> {
         return rows;
     }
 
+    public static void setSpecificDataSource(Class<?> clazz, DataSource dataSource) {
+        String clazzName = clazz.getName();
+        logger.error("Setting specific data source for [clazz=" + clazzName + "].");
+        dataSourceByClazzName.put(clazzName, dataSource);
+    }
+
     private class TableUpdaterRunnable implements Runnable {
         @Override
         public void run() {
-            AttachConnectionHelper attachConnectionHelper = new AttachConnectionHelper();
+            //AttachConnectionHelper attachConnectionHelper = new AttachConnectionHelper();
             @SuppressWarnings("UnsecureRandomNumberGeneration") Random sleepRandom = new Random();
 
             while (running) {
-                attachConnectionHelper.reattach();
+                //attachConnectionHelper.reattach();
                 try {
                     update(sleepRandom);
                 } catch (Exception e) {
@@ -399,32 +463,32 @@ class TableUpdater<T extends HasId> {
                 }
             }
 
-            attachConnectionHelper.stop();
+            //attachConnectionHelper.stop();
             logger.warn("Inmemo update thread for " + table.getClazz().getName() + " finished");
         }
     }
 
-    private final class AttachConnectionHelper {
-        private static final long ATTACH_TIME_MILLIS = 90_000; /* 1.5 minutes. */
-        private long attachTimeMillis;
-
-        private AttachConnectionHelper() {
-            this.attachTimeMillis = System.currentTimeMillis();
-            logger.info("Initially attached connection for " + thread.getName() + '.');
-            jacuzzi.attachConnection();
-        }
-
-        void reattach() {
-            if (attachTimeMillis + ATTACH_TIME_MILLIS < System.currentTimeMillis()) {
-                attachTimeMillis = System.currentTimeMillis();
-                logger.info("Reattaching connection for " + thread.getName() + '.');
-                jacuzzi.detachConnection();
-                jacuzzi.attachConnection();
-            }
-        }
-
-        void stop() {
-            jacuzzi.detachConnection();
-        }
-    }
+//    private final class AttachConnectionHelper {
+//        private static final long ATTACH_TIME_MILLIS = 90_000; /* 1.5 minutes. */
+//        private long attachTimeMillis;
+//
+//        private AttachConnectionHelper() {
+//            this.attachTimeMillis = System.currentTimeMillis();
+//            logger.info("Initially attached connection for " + thread.getName() + '.');
+//            jacuzzi.attachConnection();
+//        }
+//
+//        void reattach() {
+//            if (attachTimeMillis + ATTACH_TIME_MILLIS < System.currentTimeMillis()) {
+//                attachTimeMillis = System.currentTimeMillis();
+//                logger.info("Reattaching connection for " + thread.getName() + '.');
+//                jacuzzi.detachConnection();
+//                jacuzzi.attachConnection();
+//            }
+//        }
+//
+//        void stop() {
+//            jacuzzi.detachConnection();
+//        }
+//    }
 }

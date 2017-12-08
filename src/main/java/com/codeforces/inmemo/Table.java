@@ -5,6 +5,7 @@ import gnu.trove.set.hash.TLongHashSet;
 import org.apache.log4j.Logger;
 import org.jacuzzi.core.ArrayMap;
 import org.jacuzzi.core.Row;
+import org.jacuzzi.core.RowRoll;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -18,7 +19,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
-import static org.jacuzzi.core.ArrayMap.fromBinaryArray;
+import static org.jacuzzi.core.ArrayMap.toRowRoll;
 
 /**
  * @author Mike Mirzayanov (mirzayanovmr@gmail.com)
@@ -27,7 +28,7 @@ import static org.jacuzzi.core.ArrayMap.fromBinaryArray;
 public class Table<T extends HasId> {
     private static final Logger logger = Logger.getLogger(Table.class);
     private static final Pattern INDICATOR_FIELD_SPLIT_PATTERN = Pattern.compile("@");
-    private static final int JOURNAL_STREAM_BUFFER_SIZE = 128000000;
+    private static final int JOURNAL_STREAM_BUFFER_SIZE = 1000000;
 
     private final Lock lock = new ReentrantLock();
 
@@ -43,7 +44,8 @@ public class Table<T extends HasId> {
     private TableUpdater<T> tableUpdater;
     private volatile boolean preloaded;
     private final TLongSet ids = new TLongHashSet();
-    private List<Row> journal = new ArrayList<>();
+
+    private RowRoll journal = new RowRoll();
     private boolean useJournal = true;
     private static File journalsDir = new File(".");
 
@@ -194,7 +196,7 @@ public class Table<T extends HasId> {
         lock.lock();
         try {
             if (journal != null && row != null) {
-                journal.add(row);
+                journal.addRow(row);
             }
 
             ids.add(item.getId());
@@ -272,24 +274,41 @@ public class Table<T extends HasId> {
                 return;
             }
 
+            logger.error("writeJournal 1");
             File journalFile = new File(journalsDir, clazz.getSimpleName() + ".inmemo");
+            logger.error("writeJournal 2");
             lock.lock();
+            logger.error("writeJournal 3");
             try {
-                byte[] buffer = new byte[journal.size() * (journal.get(0).size() + 1) * 256];
-
+                logger.error("writeJournal 4");
+                long upperBufferSize = (long) journal.size() * (journal.getRow(0).size() + 1) * 64;
+                logger.error("writeJournal 4.5");
+                int bufferSize = Math.max(128000000, (int) Math.min(upperBufferSize, 1400000000L));
+                logger.error("writeJournal 5");
+                byte[] buffer = new byte[bufferSize];
+                logger.error("writeJournal 6");
                 long startTimeMillis = System.currentTimeMillis();
+                logger.error("writeJournal 7");
                 int offset = ArrayMap.toBinaryArray(buffer, 0, journal);
+                logger.error("writeJournal 8");
                 long toBinaryArrayTimeMillis = System.currentTimeMillis() - startTimeMillis;
+                logger.error("writeJournal 9");
                 logger.info("Journal binary data has been prepared in "
                         + toBinaryArrayTimeMillis + " ms [table='" + clazz.getSimpleName()
-                        + "', size=" + journal.size() + ", bytes=" + offset + "].");
+                        + "', size=" + journal.size() + ", bytes=" + offset + " of " + bufferSize + "].");
 
+                logger.error("writeJournal 10");
                 long beforeWriteTimeMillis = System.currentTimeMillis();
+                logger.error("writeJournal 11");
                 OutputStream outputStream = new BufferedOutputStream(
                         new FileOutputStream(new File(journalsDir, clazz.getSimpleName() + ".inmemo")), JOURNAL_STREAM_BUFFER_SIZE);
+                logger.error("writeJournal 12");
                 outputStream.write(buffer, 0, offset);
+                logger.error("writeJournal 13");
                 outputStream.close();
+                logger.error("writeJournal 14");
                 long writeTimeMillis = System.currentTimeMillis() - beforeWriteTimeMillis;
+                logger.error("writeJournal 15");
                 logger.info("Journal binary data has been written in "
                         + writeTimeMillis + " ms [table='" + clazz.getSimpleName()
                         + "', size=" + journal.size() + ", bytes=" + offset + "].");
@@ -306,7 +325,7 @@ public class Table<T extends HasId> {
         }
     }
 
-    List<Row> readJournal() {
+    RowRoll readJournal() {
         if (!useJournal) {
             return null;
         }
@@ -317,16 +336,12 @@ public class Table<T extends HasId> {
             InputStream inputStream = null;
 
             try {
-                inputStream = new BufferedInputStream(
-                                new FileInputStream(journalFile),
-                                JOURNAL_STREAM_BUFFER_SIZE
-                        );
-
-                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                int bufferSize = JOURNAL_STREAM_BUFFER_SIZE;
-                byte[] buffer = new byte[bufferSize];
+                int journalFileSize = (int) journalFile.length();
+                inputStream = new FileInputStream(journalFile);
+                ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream(journalFileSize);
+                byte[] buffer = new byte[1000000];
                 while (true) {
-                    int read = inputStream.read(buffer, 0, bufferSize);
+                    int read = inputStream.read(buffer);
                     if (read < 0) {
                         break;
                     }
@@ -340,19 +355,19 @@ public class Table<T extends HasId> {
                         + "', bytes=" + bytes.length + "].");
 
                 long beforeFfomBinaryArrayTimeMillis = System.currentTimeMillis();
-                List<Row> rows = fromBinaryArray(bytes);
+                RowRoll rowRoll = toRowRoll(bytes);
 
                 durationTimeMillis = System.currentTimeMillis() - beforeFfomBinaryArrayTimeMillis;
                 logger.info("Journal binary data has been parsed in "
                         + durationTimeMillis + " ms [table='" + clazz.getSimpleName()
-                        + "', size=" + rows.size() + "].");
+                        + "', size=" + rowRoll.size() + "].");
 
                 durationTimeMillis = System.currentTimeMillis() - startTimeMillis;
                 logger.info("Journal has been read in "
                         + durationTimeMillis + " ms [table='" + clazz.getSimpleName()
-                        + "', size=" + rows.size() + "].");
+                        + "', size=" + rowRoll.size() + "].");
 
-                return rows;
+                return rowRoll;
             } catch (ClassCastException e) {
                 logger.error("ClassCastException: Unable to read journal [table='" + clazz.getSimpleName() + "'].", e);
                 return null;
