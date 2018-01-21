@@ -34,9 +34,18 @@ public final class Inmemo {
     private static final Map<String, Table<? extends HasId>> tables = new ConcurrentHashMap<>();
     private static final Lock tablesLock = new ReentrantLock();
     private static final ConcurrentMap<ClassPair, BeanCopier> beanCopiers = new ConcurrentHashMap<>();
+    private static volatile boolean debug;
 
     private Inmemo() {
         // No operations.
+    }
+
+    static boolean isDebug() {
+        return debug;
+    }
+
+    public static void setDebug(boolean debug) {
+        Inmemo.debug = debug;
     }
 
     private static BeanCopier getBeanCopier(Class<?> sourceClass, Class<?> targetClass) {

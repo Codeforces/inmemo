@@ -8,7 +8,6 @@ import org.jacuzzi.core.TypeOracle;
 
 import javax.sql.DataSource;
 import java.io.IOException;
-import java.security.spec.DSAGenParameterSpec;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +19,12 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 class TableUpdater<T extends HasId> {
     private static final Logger logger = Logger.getLogger(TableUpdater.class);
+
+    /**
+     * Delay after meaningless update try.
+     */
+    private static final long RESCAN_TIME_MILLIS = 500;
+
     private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 1_750_000;
     private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 5;
 
@@ -40,11 +45,6 @@ class TableUpdater<T extends HasId> {
 
     private Object lastIndicatorValue;
     private final long startTimeMillis;
-
-    /**
-     * Delay after meaningless update try.
-     */
-    private static final long rescanTimeMillis = 500;
 
     private final Map<Long, Integer> lastEntityIdsUpdateCount = new HashMap<>();
 
@@ -190,23 +190,11 @@ class TableUpdater<T extends HasId> {
                         + " rows [lastIndicatorValue=" + lastIndicatorValue
                         + ", thread=" + threadName
                         + ", time=" + getRecentlyChangedMillis + " ms].");
-            } else if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
-                logger.error("Table '" + table.getClazz().getSimpleName() + "': getRecentlyChangedRows returns " + rows.size()
-                        + " rows [lastIndicatorValue=" + lastIndicatorValue
-                        + ", thread=" + threadName
-                        + ", time=" + getRecentlyChangedMillis + " ms].");
             }
 
             Object previousIndicatorLastValue = lastIndicatorValue;
             boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
             List<Long> updatedIds = new ArrayList<>();
-
-            if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
-                logger.error(String.format(
-                        "UPDATE ContestParticipant (1): lastIndicatorValue=%s, rows.size=%d, hasInsertOrUpdateByRow=%b.",
-                        lastIndicatorValue, rows.size(), hasInsertOrUpdateByRow
-                ));
-            }
 
             if (advancedLogging) {
                 logger.warn(String.format(
@@ -250,13 +238,6 @@ class TableUpdater<T extends HasId> {
                 lastIndicatorValue = row.get(table.getIndicatorField());
             }
 
-            if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
-                logger.error(String.format(
-                        "UPDATE ContestParticipant (3): lastIndicatorValue=%s, updatedIds.size=%d.",
-                        lastIndicatorValue, updatedIds.size()
-                ));
-            }
-
             if (advancedLogging) {
                 logger.warn(String.format(
                         "UPDATE ContestParticipant (3): lastIndicatorValue=%s, updatedIds.size=%d.",
@@ -284,18 +265,6 @@ class TableUpdater<T extends HasId> {
 
                 if (!updatedIds.isEmpty()) {
                     logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
-                            threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
-                    if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
-                        logger.error(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
-                                threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
-                    }
-                }
-            }
-
-            if (!updatedIds.isEmpty()) {
-                if (false && table.getClazz().getSimpleName().equals("ContestParticipant")) {
-                    logger.error(String.format("Thread '%s' has updated %d items in %d ms [" + table.isPreloaded()
-                                    + ", lastIndicatorValue=" + lastIndicatorValue + "].",
                             threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
                 }
             }
@@ -353,6 +322,8 @@ class TableUpdater<T extends HasId> {
     }
 
     private void sleepBetweenRescans(Random timeSleepRandom, int updatedCount) {
+        long rescanTimeMillis = getRescanTimeMillis();
+
         if (updatedCount == 0) {
             sleep((4 * rescanTimeMillis / 5) + timeSleepRandom.nextInt((int) (rescanTimeMillis / 5)));
         } else if ((updatedCount << 1) > MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
@@ -361,6 +332,14 @@ class TableUpdater<T extends HasId> {
             ));
         } else {
             sleep(timeSleepRandom.nextInt((int) (rescanTimeMillis / 5)));
+        }
+    }
+
+    private long getRescanTimeMillis() {
+        if (Inmemo.isDebug()) {
+            return RESCAN_TIME_MILLIS * 5;
+        } else {
+            return RESCAN_TIME_MILLIS;
         }
     }
 
@@ -420,7 +399,7 @@ class TableUpdater<T extends HasId> {
         }
 
         long queryTimeMillis = System.currentTimeMillis() - startTimeMillis;
-        if (queryTimeMillis * 10 > rescanTimeMillis) {
+        if (queryTimeMillis * 10 > getRescanTimeMillis()) {
             logger.warn(String.format(
                     "Rescanning query for entity `%s` took too long time %d ms.",
                     table.getClazz().getName(), queryTimeMillis
