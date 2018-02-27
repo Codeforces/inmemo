@@ -91,6 +91,14 @@ class TableUpdater<T extends HasId> {
         thread.start();
     }
 
+    private int getMaxUpdateSameIndicatorTimes() {
+        if (table.isPreloaded()) {
+            return MAX_UPDATE_SAME_INDICATOR_TIMES;
+        } else {
+            return 1;
+        }
+    }
+
     void insertOrUpdateById(Long id) {
         RowRoll rows = jacuzzi.findRowRoll(String.format("SELECT * FROM %s WHERE %s = %s",
                 typeOracle.getTableName(), typeOracle.getIdColumn(), id.toString()
@@ -210,7 +218,7 @@ class TableUpdater<T extends HasId> {
                 long id = (long) rows.getValue(i, idColumn);
 
                 if (Objects.equals(rows.getValue(i, indicatorFieldColumn), previousIndicatorLastValue)
-                        && lastEntityIdsUpdateCount.containsKey(id) && lastEntityIdsUpdateCount.get(id) >= MAX_UPDATE_SAME_INDICATOR_TIMES) {
+                        && lastEntityIdsUpdateCount.containsKey(id) && lastEntityIdsUpdateCount.get(id) >= getMaxUpdateSameIndicatorTimes()) {
                     continue;
                 }
 
@@ -307,6 +315,7 @@ class TableUpdater<T extends HasId> {
                     lastEntityIdsUpdateCount.put(id, updateCount);
                 }
             }
+
             return trulyUpdatedIds;
         } finally {
             updateLock.unlock();
@@ -337,7 +346,8 @@ class TableUpdater<T extends HasId> {
 
     private long getRescanTimeMillis() {
         if (Inmemo.isDebug()) {
-            return RESCAN_TIME_MILLIS * 5;
+            return RESCAN_TIME_MILLIS;
+            //return RESCAN_TIME_MILLIS * 5;
         } else {
             return RESCAN_TIME_MILLIS;
         }
