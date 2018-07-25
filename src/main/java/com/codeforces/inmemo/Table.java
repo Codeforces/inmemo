@@ -274,41 +274,41 @@ public class Table<T extends HasId> {
                 return;
             }
 
-            logger.error("writeJournal 1");
+            logger.info("writeJournal 1");
             File journalFile = new File(journalsDir, clazz.getSimpleName() + ".inmemo");
-            logger.error("writeJournal 2");
+            logger.info("writeJournal 2");
             lock.lock();
-            logger.error("writeJournal 3");
+            logger.info("writeJournal 3");
             try {
-                logger.error("writeJournal 4");
+                logger.info("writeJournal 4");
                 long upperBufferSize = (long) journal.size() * (journal.getRow(0).size() + 1) * 64;
-                logger.error("writeJournal 4.5");
-                int bufferSize = Math.max(128000000, (int) Math.min(upperBufferSize, 1400000000L));
-                logger.error("writeJournal 5");
+                logger.info("writeJournal 4.5");
+                int bufferSize = Math.max(128000000, (int) Math.min(upperBufferSize, 1800000000L));
+                logger.info("writeJournal 5");
                 byte[] buffer = new byte[bufferSize];
-                logger.error("writeJournal 6");
+                logger.info("writeJournal 6");
                 long startTimeMillis = System.currentTimeMillis();
-                logger.error("writeJournal 7");
+                logger.info("writeJournal 7");
                 int offset = ArrayMap.toBinaryArray(buffer, 0, journal);
-                logger.error("writeJournal 8");
+                logger.info("writeJournal 8");
                 long toBinaryArrayTimeMillis = System.currentTimeMillis() - startTimeMillis;
-                logger.error("writeJournal 9");
+                logger.info("writeJournal 9");
                 logger.info("Journal binary data has been prepared in "
                         + toBinaryArrayTimeMillis + " ms [table='" + clazz.getSimpleName()
                         + "', size=" + journal.size() + ", bytes=" + offset + " of " + bufferSize + "].");
 
-                logger.error("writeJournal 10");
+                logger.info("writeJournal 10");
                 long beforeWriteTimeMillis = System.currentTimeMillis();
-                logger.error("writeJournal 11");
+                logger.info("writeJournal 11");
                 OutputStream outputStream = new BufferedOutputStream(
                         new FileOutputStream(new File(journalsDir, clazz.getSimpleName() + ".inmemo")), JOURNAL_STREAM_BUFFER_SIZE);
-                logger.error("writeJournal 12");
+                logger.info("writeJournal 12");
                 outputStream.write(buffer, 0, offset);
-                logger.error("writeJournal 13");
+                logger.info("writeJournal 13");
                 outputStream.close();
-                logger.error("writeJournal 14");
+                logger.info("writeJournal 14");
                 long writeTimeMillis = System.currentTimeMillis() - beforeWriteTimeMillis;
-                logger.error("writeJournal 15");
+                logger.info("writeJournal 15");
                 logger.info("Journal binary data has been written in "
                         + writeTimeMillis + " ms [table='" + clazz.getSimpleName()
                         + "', size=" + journal.size() + ", bytes=" + offset + "].");

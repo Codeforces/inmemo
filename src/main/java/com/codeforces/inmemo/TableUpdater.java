@@ -67,7 +67,7 @@ class TableUpdater<T extends HasId> {
         thread = new Thread(new TableUpdaterRunnable(), threadName);
         thread.setDaemon(true);
 
-        logger.error("Started Inmemo table updater thread '" + threadName + "'.");
+        logger.info("Started Inmemo table updater thread '" + threadName + "'.");
         startTimeMillis = System.currentTimeMillis();
 
         //noinspection ThisEscapedInObjectConstruction
@@ -204,13 +204,6 @@ class TableUpdater<T extends HasId> {
             boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
             List<Long> updatedIds = new ArrayList<>();
 
-            if (advancedLogging) {
-                logger.warn(String.format(
-                        "UPDATE ContestParticipant (1): lastIndicatorValue=%s, rows.size=%d, hasInsertOrUpdateByRow=%b.",
-                        lastIndicatorValue, rows.size(), hasInsertOrUpdateByRow
-                ));
-            }
-
             int idColumn = getIdColumn(rows);
             int indicatorFieldColumn = rows.getColumn(table.getIndicatorField());
 
@@ -246,13 +239,6 @@ class TableUpdater<T extends HasId> {
                 lastIndicatorValue = row.get(table.getIndicatorField());
             }
 
-            if (advancedLogging) {
-                logger.warn(String.format(
-                        "UPDATE ContestParticipant (3): lastIndicatorValue=%s, updatedIds.size=%d.",
-                        lastIndicatorValue, updatedIds.size()
-                ));
-            }
-
             if (updatedIds.size() >= 10) {
                 logger.info(String.format("Thread '%s' has found %s rows to update in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].", threadName,
                         rows.size(), getRecentlyChangedMillis));
@@ -266,9 +252,6 @@ class TableUpdater<T extends HasId> {
                         ids.append(id);
                     }
                     logger.info("Updated entries have id=" + ids + '.');
-                    if (table.getClazz().getSimpleName().equals("ContestParticipant")) {
-                        logger.error("Updated entries have id=" + ids + '.');
-                    }
                 }
 
                 if (!updatedIds.isEmpty()) {
@@ -278,7 +261,7 @@ class TableUpdater<T extends HasId> {
             }
 
             if (updatedIds.isEmpty() && !table.isPreloaded()) {
-                logger.error("Inmemo ready to dump journal of table " + ReflectionUtil.getTableClassName(table.getClazz())
+                logger.info("Inmemo ready to dump journal of table " + ReflectionUtil.getTableClassName(table.getClazz())
                         + " [items=" + table.size() + "].");
                 long totalTimeMillis = System.currentTimeMillis() - this.startTimeMillis;
                 try {
@@ -375,7 +358,7 @@ class TableUpdater<T extends HasId> {
         }
 
         if (rows != null) {
-                logger.error("getRecentlyChangedRows loads data of using the journal in "
+                logger.info("getRecentlyChangedRows loads data of using the journal in "
                     + (System.currentTimeMillis() - startTimeMillis)
                     + " ms [table=" + table.getClazz().getSimpleName() + "].");
             return rows;
@@ -431,7 +414,7 @@ class TableUpdater<T extends HasId> {
 
     public static void setSpecificDataSource(Class<?> clazz, DataSource dataSource) {
         String clazzName = clazz.getName();
-        logger.error("Setting specific data source for [clazz=" + clazzName + "].");
+        logger.info("Setting specific data source for [clazz=" + clazzName + "].");
         dataSourceByClazzName.put(clazzName, dataSource);
     }
 
