@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentMap;
 /**
  * @author MikeMirzayanov (mirzayanovmr@gmail.com)
  */
+@SuppressWarnings("WeakerAccess")
 final class ReflectionUtil {
     private static final ConcurrentMap<Class<?>, FastClass> fastClassCache = new ConcurrentHashMap<>();
     private static final ConcurrentMap<Class<?>, Map<String, FastMethod>> gettersCache = new ConcurrentHashMap<>();

@@ -8,6 +8,7 @@ import java.util.List;
 /**
  * @author MikeMirzayanov (mirzayanovmr@gmail.com)
  */
+@SuppressWarnings("WeakerAccess")
 public class Indices<T extends HasId> {
     private final List<Index<T, ?>> indices = new ArrayList<>();
     private final List<RowListener> rowListeners = new ArrayList<>();
@@ -37,6 +38,7 @@ public class Indices<T extends HasId> {
         return Collections.unmodifiableList(itemListeners);
     }
 
+    @SuppressWarnings("unused")
     public static class Builder<T extends HasId> {
         private final Collection<Index<T, ?>> indices = new ArrayList<>();
         private final Collection<RowListener> rowListeners = new ArrayList<>();

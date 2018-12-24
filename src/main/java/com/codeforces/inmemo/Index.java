@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentMap;
 /**
  * @author MikeMirzayanov (mirzayanovmr@gmail.com)
  */
+@SuppressWarnings("WeakerAccess")
 public class Index<T extends HasId, V> {
     private static final Logger logger = Logger.getLogger(Index.class);
 
@@ -102,6 +103,7 @@ public class Index<T extends HasId, V> {
         }
 
         if (unique) {
+            assert uniqueMap != null;
             T previousTableItem = uniqueMap.get(value);
             if (previousTableItem != null
                     && previousTableItem.getId() != tableItem.getId()) {
@@ -112,8 +114,9 @@ public class Index<T extends HasId, V> {
 
             uniqueMap.put(value, tableItem);
         } else {
+            assert map != null;
             if (!map.containsKey(value)) {
-                map.putIfAbsent(value, new ConcurrentHashMap<Long, T>());
+                map.putIfAbsent(value, new ConcurrentHashMap<>());
             }
 
             map.get(value).put(tableItem.getId(), tableItem);
@@ -126,7 +129,7 @@ public class Index<T extends HasId, V> {
             if (tableItem == null) {
                 return Collections.emptyList();
             } else {
-                return Arrays.asList(tableItem);
+                return Collections.singletonList(tableItem);
             }
         }
 
@@ -137,6 +140,7 @@ public class Index<T extends HasId, V> {
 
         Object wrappedValue = wrapValue(value);
 
+        assert map != null;
         Map<Long, T> valueMap = map.get(wrappedValue);
 
         if ((valueMap == null || valueMap.isEmpty()) && emergencyDatabaseHelper == null) {
@@ -167,6 +171,7 @@ public class Index<T extends HasId, V> {
         Object wrappedValue = wrapValue(value);
 
         if (unique) {
+            assert uniqueMap != null;
             T tableItem = uniqueMap.get(wrappedValue);
 
             if (tableItem == null && emergencyDatabaseHelper != null) {
@@ -191,6 +196,7 @@ public class Index<T extends HasId, V> {
                 return tableItem;
             }
         } else {
+            assert map != null;
             Map<Long, T> valueMap = map.get(wrappedValue);
 
             if ((valueMap == null || valueMap.isEmpty()) && emergencyDatabaseHelper == null) {

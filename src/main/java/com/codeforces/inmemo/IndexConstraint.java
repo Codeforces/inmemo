@@ -3,6 +3,7 @@ package com.codeforces.inmemo;
 /**
  * @author MikeMirzayanov (mirzayanovmr@gmail.com)
  */
+@SuppressWarnings("WeakerAccess")
 public class IndexConstraint<V> {
     private final String indexName;
     private final V value;

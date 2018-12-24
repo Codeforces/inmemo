@@ -113,6 +113,7 @@ public class Table<T extends HasId> {
         this.preloaded = preloaded;
     }
 
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     boolean isCompatibleItemClass(Class<? extends HasId> otherItemClass) {
         return clazz == otherItemClass
                 || clazzSpec.equals(ReflectionUtil.getTableClassSpec(otherItemClass));
@@ -283,7 +284,7 @@ public class Table<T extends HasId> {
                 logger.info("writeJournal 4");
                 long upperBufferSize = (long) journal.size() * (journal.getRow(0).size() + 1) * 64;
                 logger.info("writeJournal 4.5");
-                int bufferSize = Math.max(128000000, (int) Math.min(upperBufferSize, 1800000000L));
+                int bufferSize = Math.max(128000000, (int) Math.min(upperBufferSize, 2000000000L));
                 logger.info("writeJournal 5");
                 byte[] buffer = new byte[bufferSize];
                 logger.info("writeJournal 6");

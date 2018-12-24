@@ -7,6 +7,7 @@ import javax.annotation.Nonnull;
 /**
  * @author Mike Mirzayanov (mirzayanovmr@gmail.com)
  */
+@SuppressWarnings({"WeakerAccess", "unused"})
 public class RowListener {
     private final String name;
     private final Listener listener;

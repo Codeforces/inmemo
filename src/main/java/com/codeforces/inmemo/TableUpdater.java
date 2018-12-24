@@ -25,7 +25,7 @@ class TableUpdater<T extends HasId> {
      */
     private static final long RESCAN_TIME_MILLIS = 500;
 
-    private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 1_750_000;
+    private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 2_000_000;
     private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 5;
 
     private final Lock updateLock = new ReentrantLock();
@@ -35,7 +35,6 @@ class TableUpdater<T extends HasId> {
     private static final Collection<TableUpdater<? extends HasId>> instances = new ArrayList<>();
 
     private final Table table;
-    private final boolean advancedLogging; // TODO remove
     private final Thread thread;
     private final String threadName;
     private volatile boolean running;
@@ -55,7 +54,6 @@ class TableUpdater<T extends HasId> {
         }
 
         this.table = table;
-        this.advancedLogging = false; // "ContestParticipant".equals(table.getClazz().getSimpleName());
         this.lastIndicatorValue = initialIndicatorValue;
 
         DataSource clazzDataSource = dataSourceByClazzName.get(table.getClazz().getName());
@@ -165,7 +163,7 @@ class TableUpdater<T extends HasId> {
 
         for (int index = 0; index < fields.length; index += 2) {
             Object field = fields[index];
-            if (field == null || !(field instanceof String) || ((String) field).isEmpty()) {
+            if (!(field instanceof String) || ((String) field).isEmpty()) {
                 throw new IllegalArgumentException("EmergencyQueryFields array must contain non-empty strings on even positions. Found: "
                         + Arrays.toString(fields) + '.');
             }
@@ -329,8 +327,7 @@ class TableUpdater<T extends HasId> {
 
     private long getRescanTimeMillis() {
         if (Inmemo.isDebug()) {
-            return RESCAN_TIME_MILLIS;
-            //return RESCAN_TIME_MILLIS * 5;
+            return RESCAN_TIME_MILLIS; // * 20;
         } else {
             return RESCAN_TIME_MILLIS;
         }
@@ -398,20 +395,10 @@ class TableUpdater<T extends HasId> {
                     table.getClazz().getName(), queryTimeMillis
             ));
         }
-
-//        int rowCount = rows.size();
-//        if (rowCount == MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
-//            logger.warn(String.format(
-//                    "Suspicious row count while rescanning `%s` [rowCount=%d, queryTime=%d ms].",
-//                    table.getClazz().getName(),
-//                    MAX_ROWS_IN_SINGLE_SQL_STATEMENT,
-//                    queryTimeMillis
-//            ));
-//        }
-
         return rows;
     }
 
+    @SuppressWarnings("WeakerAccess")
     public static void setSpecificDataSource(Class<?> clazz, DataSource dataSource) {
         String clazzName = clazz.getName();
         logger.info("Setting specific data source for [clazz=" + clazzName + "].");
@@ -421,11 +408,9 @@ class TableUpdater<T extends HasId> {
     private class TableUpdaterRunnable implements Runnable {
         @Override
         public void run() {
-            //AttachConnectionHelper attachConnectionHelper = new AttachConnectionHelper();
             @SuppressWarnings("UnsecureRandomNumberGeneration") Random sleepRandom = new Random();
 
             while (running) {
-                //attachConnectionHelper.reattach();
                 try {
                     update(sleepRandom);
                 } catch (Exception e) {
@@ -435,32 +420,7 @@ class TableUpdater<T extends HasId> {
                 }
             }
 
-            //attachConnectionHelper.stop();
             logger.warn("Inmemo update thread for " + table.getClazz().getName() + " finished");
         }
     }
-
-//    private final class AttachConnectionHelper {
-//        private static final long ATTACH_TIME_MILLIS = 90_000; /* 1.5 minutes. */
-//        private long attachTimeMillis;
-//
-//        private AttachConnectionHelper() {
-//            this.attachTimeMillis = System.currentTimeMillis();
-//            logger.info("Initially attached connection for " + thread.getName() + '.');
-//            jacuzzi.attachConnection();
-//        }
-//
-//        void reattach() {
-//            if (attachTimeMillis + ATTACH_TIME_MILLIS < System.currentTimeMillis()) {
-//                attachTimeMillis = System.currentTimeMillis();
-//                logger.info("Reattaching connection for " + thread.getName() + '.');
-//                jacuzzi.detachConnection();
-//                jacuzzi.attachConnection();
-//            }
-//        }
-//
-//        void stop() {
-//            jacuzzi.detachConnection();
-//        }
-//    }
 }

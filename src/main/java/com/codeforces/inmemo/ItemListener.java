@@ -5,6 +5,7 @@ import javax.annotation.Nonnull;
 /**
  * @author Mike Mirzayanov (mirzayanovmr@gmail.com)
  */
+@SuppressWarnings({"WeakerAccess", "unused"})
 public class ItemListener<T extends HasId> {
     private final String name;
     private final Listener<T> listener;

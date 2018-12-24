@@ -29,6 +29,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * framework.
  * </p>
  */
+@SuppressWarnings({"WeakerAccess", "unused"})
 public final class Inmemo {
     private static final Logger logger = Logger.getLogger(Inmemo.class);
     private static final Map<String, Table<? extends HasId>> tables = new ConcurrentHashMap<>();
@@ -506,13 +507,5 @@ public final class Inmemo {
             result = 31 * result + classB.hashCode();
             return result;
         }
-    }
-
-    public static void main(String[] args) throws IllegalAccessException, InstantiationException {
-        BeanCopier beanCopier = getBeanCopier(Person.class, Person.class);
-        Person from = null; // new Person(); // new Person(123, 124, 125, Person.A.Y);
-        Person to = Person.class.newInstance();
-        beanCopier.copy(from, to, null);
-        System.out.println(to);
     }
 }
