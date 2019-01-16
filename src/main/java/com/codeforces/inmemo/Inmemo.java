@@ -6,12 +6,10 @@ import org.apache.log4j.Logger;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.sql.DataSource;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -36,6 +34,7 @@ public final class Inmemo {
     private static final Lock tablesLock = new ReentrantLock();
     private static final ConcurrentMap<ClassPair, BeanCopier> beanCopiers = new ConcurrentHashMap<>();
     private static volatile boolean debug;
+    private static final Set<Class<?>> noSizeSupportClasses = new HashSet<>();
 
     private Inmemo() {
         // No operations.
@@ -81,6 +80,20 @@ public final class Inmemo {
         }
 
         return true;
+    }
+
+    /**
+     * Table maintains ids set to support size() operation. Use this function
+     * to refuse support of size() to reduce memory footprint.
+     *
+     * @param clazz Table item class.
+     */
+    public static void unsetSizeSupport(@Nonnull Class<?> clazz) {
+        noSizeSupportClasses.add(clazz);
+    }
+
+    static Set<Class<?>> getNoSizeSupportClasses() {
+        return noSizeSupportClasses;
     }
 
     /**

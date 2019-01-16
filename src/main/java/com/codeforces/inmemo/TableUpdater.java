@@ -1,6 +1,8 @@
 package com.codeforces.inmemo;
 
+import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
+import org.apache.log4j.Priority;
 import org.jacuzzi.core.Jacuzzi;
 import org.jacuzzi.core.Row;
 import org.jacuzzi.core.RowRoll;
@@ -229,9 +231,11 @@ class TableUpdater<T extends HasId> {
                     logger.warn("Inserted " + i + " rows in a batch [table=" + table.getClazz().getSimpleName() + "].");
                 }
 
-                int tableSize = table.size();
-                if (tableSize > 0 && tableSize % 100000 == 0) {
-                    logger.warn("Table " + table.getClazz().getSimpleName() + " contains now " + tableSize + " rows.");
+                if (table.hasSize()) {
+                    int tableSize = table.size();
+                    if (tableSize > 0 && tableSize % 100000 == 0) {
+                        logger.warn("Table " + table.getClazz().getSimpleName() + " contains now " + tableSize + " rows.");
+                    }
                 }
 
                 lastIndicatorValue = row.get(table.getIndicatorField());
@@ -259,8 +263,10 @@ class TableUpdater<T extends HasId> {
             }
 
             if (updatedIds.isEmpty() && !table.isPreloaded()) {
-                logger.info("Inmemo ready to dump journal of table " + ReflectionUtil.getTableClassName(table.getClazz())
-                        + " [items=" + table.size() + "].");
+                if (table.hasSize()) {
+                    logger.info("Inmemo ready to dump journal of table " + ReflectionUtil.getTableClassName(table.getClazz())
+                            + " [items=" + table.size() + "].");
+                }
                 long totalTimeMillis = System.currentTimeMillis() - this.startTimeMillis;
                 try {
                     table.writeJournal();
@@ -268,12 +274,12 @@ class TableUpdater<T extends HasId> {
                     logger.error("Inmemo failed to dump journal of table " + ReflectionUtil.getTableClassName(table.getClazz())
                             + " [items=" + table.size() + "] in " + totalTimeMillis + " ms.", e);
                 }
-                if (totalTimeMillis < TimeUnit.SECONDS.toMillis(1)) {
-                    logger.info("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
+                if (table.hasSize()) {
+                    logger.log(totalTimeMillis < TimeUnit.SECONDS.toMillis(1) ? Level.INFO : Level.WARN, "Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
                             + " [items=" + table.size() + "] in " + totalTimeMillis + " ms.");
                 } else {
-                    logger.warn("Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
-                            + " [items=" + table.size() + "] in " + totalTimeMillis + " ms.");
+                    logger.log(totalTimeMillis < TimeUnit.SECONDS.toMillis(1) ? Level.INFO : Level.WARN, "Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
+                            + " in " + totalTimeMillis + " ms.");
                 }
                 table.setPreloaded(true);
             }
@@ -355,7 +361,7 @@ class TableUpdater<T extends HasId> {
         }
 
         if (rows != null) {
-                logger.info("getRecentlyChangedRows loads data of using the journal in "
+            logger.info("getRecentlyChangedRows loads data of using the journal in "
                     + (System.currentTimeMillis() - startTimeMillis)
                     + " ms [table=" + table.getClazz().getSimpleName() + "].");
             return rows;

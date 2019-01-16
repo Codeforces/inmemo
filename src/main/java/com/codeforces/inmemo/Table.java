@@ -15,6 +15,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
@@ -43,11 +44,12 @@ public class Table<T extends HasId> {
 
     private TableUpdater<T> tableUpdater;
     private volatile boolean preloaded;
-    private final TLongSet ids = new TLongHashSet();
+    private final TLongSet ids;
 
     private RowRoll journal = new RowRoll();
     private boolean useJournal = true;
     private static File journalsDir = new File(".");
+    private final AtomicInteger insertOrUpdateCount = new AtomicInteger();
 
     public static void setJournalsDir(File journalsDir) {
         if (!journalsDir.isDirectory()) {
@@ -78,6 +80,7 @@ public class Table<T extends HasId> {
             this.databaseIndex = null;
         }
         clazzSpec = ReflectionUtil.getTableClassSpec(clazz);
+        ids = Inmemo.getNoSizeSupportClasses().contains(clazz) ? null : new TLongHashSet();
     }
 
     void createUpdater(Object initialIndicatorValue) {
@@ -157,6 +160,10 @@ public class Table<T extends HasId> {
         return !rowListeners.isEmpty();
     }
 
+    boolean hasSize() {
+        return ids != null;
+    }
+
     @SuppressWarnings("unchecked")
     <U extends HasId> void insertOrUpdate(@Nonnull U item, @Nullable Row row) {
         Class<?> itemClass = item.getClass();
@@ -185,6 +192,10 @@ public class Table<T extends HasId> {
     }
 
     int size() {
+        if (ids == null) {
+            throw new UnsupportedOperationException("The operation is unsupported due Inmemo.unsetSizeSupport(clazz).");
+        }
+
         lock.lock();
         try {
             return ids.size();
@@ -200,7 +211,10 @@ public class Table<T extends HasId> {
                 journal.addRow(row);
             }
 
-            ids.add(item.getId());
+            if (ids != null) {
+                ids.add(item.getId());
+            }
+
             for (Index<T, ?> index : indices.values()) {
                 index.insertOrUpdate(item);
             }
@@ -209,6 +223,12 @@ public class Table<T extends HasId> {
             }
         } finally {
             lock.unlock();
+        }
+
+        int count = insertOrUpdateCount.incrementAndGet();
+        if (count % 100000 == 0) {
+            logger.info("Inmemo: table " + ReflectionUtil.getTableClassName(getClazz())
+                    + " insertOrUpdateCount=" + count + ".");
         }
     }
 
