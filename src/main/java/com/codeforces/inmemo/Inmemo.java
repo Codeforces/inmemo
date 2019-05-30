@@ -6,6 +6,7 @@ import org.apache.log4j.Logger;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.sql.DataSource;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -489,6 +490,14 @@ public final class Inmemo {
 
     public static void setSpecificDataSource(Class<?> clazz, @Nonnull DataSource dataSource) {
         TableUpdater.setSpecificDataSource(clazz, dataSource);
+    }
+
+    public static <T extends HasId> void deleteJournal(Class<T> clazz) throws IOException {
+        if (clazz == null) {
+            throw new IllegalArgumentException("Illegal arguments for Inmemo#deleteJournal: clazz = <null>");
+        }
+
+        getTableByClass(clazz).deleteJournal();
     }
 
     private static final class ClassPair {

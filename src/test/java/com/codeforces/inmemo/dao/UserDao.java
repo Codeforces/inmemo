@@ -14,6 +14,7 @@ public interface UserDao {
     void insert(User user);
     List<User> findAll();
     User newRandomUser();
+    int findCountByHandlePrefix(String prefix);
 
     String getRandomString();
 }

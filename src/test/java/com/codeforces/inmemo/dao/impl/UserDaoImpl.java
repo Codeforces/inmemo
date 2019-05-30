@@ -42,6 +42,11 @@ public class UserDaoImpl extends GenericDaoImpl<User, Long> implements UserDao {
         return user;
     }
 
+    @Override
+    public int findCountByHandlePrefix(String prefix) {
+        return (int) findCountBy("SUBSTRING(HANDLE, 1, ?)=?", prefix.length(), prefix);
+    }
+
     public String getRandomString() {
         StringBuilder result = new StringBuilder();
 
