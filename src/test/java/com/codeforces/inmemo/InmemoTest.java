@@ -27,7 +27,7 @@ import static org.hamcrest.core.IsNot.not;
  */
 public class InmemoTest {
     private static final long USER_COUNT = 10000;
-    private static final long BASE_SLEEP_MS = 500;
+    private static final long BASE_SLEEP_MS = 1500;
 
     private UserDao userDao;
 
