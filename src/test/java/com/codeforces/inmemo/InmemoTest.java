@@ -12,6 +12,8 @@ import org.junit.Test;
 
 import javax.annotation.Nullable;
 import javax.sql.DataSource;
+import java.io.File;
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.*;
@@ -115,8 +117,8 @@ public class InmemoTest {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
                 add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
                     @Override
-                    public Long get(User tableItem) {
-                        return tableItem.getId();
+                    public Long get(User user) {
+                        return user.getId();
                     }
                 }));
 
@@ -129,8 +131,8 @@ public class InmemoTest {
 
                 add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
                     @Override
-                    public String get(User tableItem) {
-                        return tableItem.getHandle().substring(0, 1);
+                    public String get(User user) {
+                        return user.getHandle().substring(0, 1);
                     }
                 }));
             }}.build(), true);
@@ -145,12 +147,14 @@ public class InmemoTest {
 
         // Exactly one user with id=123.
         {
-            Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), new Matcher<User>() {
+            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), new Matcher<User>() {
                 @Override
                 public boolean match(User user) {
                     return true;
                 }
-            }).size());
+            });
+            Assert.assertEquals(1, users.size());
+            Assert.assertEquals(123L, users.get(0).getId());
         }
         System.out.println(4);
 
@@ -164,15 +168,16 @@ public class InmemoTest {
             }).size());
 
             userDao.insertRandom();
-
             Thread.sleep(BASE_SLEEP_MS);
 
-            Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<User>() {
+            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<User>() {
                 @Override
                 public boolean match(User user) {
                     return true;
                 }
-            }).size());
+            });
+            Assert.assertEquals(1, users.size());
+            Assert.assertEquals(USER_COUNT + 1, users.get(0).getId());
         }
         System.out.println(5);
 
@@ -188,12 +193,14 @@ public class InmemoTest {
             userDao.insertRandom();
             Inmemo.update(User.class);
 
-            Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<User>() {
+            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<User>() {
                 @Override
                 public boolean match(User user) {
                     return true;
                 }
-            }).size());
+            });
+            Assert.assertEquals(1, users.size());
+            Assert.assertEquals(USER_COUNT + 2, users.get(0).getId());
         }
         System.out.println(6);
 
@@ -213,8 +220,9 @@ public class InmemoTest {
                 }
             }).size();
 
-            Assert.assertEquals(eUsers1, eUsers2);
-            Assert.assertTrue(USER_COUNT / 26 / 2 <= eUsers1 && eUsers1 <= USER_COUNT / 26 * 2);
+            int expectedCount = userDao.findCountByHandlePrefix("e");
+            Assert.assertEquals(expectedCount, eUsers1);
+            Assert.assertEquals(expectedCount, eUsers2);
         }
         System.out.println(7);
 
@@ -227,7 +235,7 @@ public class InmemoTest {
                 }
             });
 
-            Assert.assertTrue(USER_COUNT / 26 / 26 / 3 <= xyUsers && xyUsers <= USER_COUNT / 26 / 26 * 3);
+            Assert.assertEquals(userDao.findCountByHandlePrefix("xy"), xyUsers);
         }
         System.out.println(8);
 
@@ -816,11 +824,15 @@ public class InmemoTest {
     }
 
     @Test
-    public void testJournal() {
+    public void testJournal() throws IOException {
         System.setProperty("Inmemo.UseJournal", "true");
+
+        File journalFile = new File("User.inmemo");
+        journalFile.delete();
 
         try {
             Inmemo.dropTableIfExists(User.class);
+            Assert.assertFalse(journalFile.isFile());
 
             // Create table.
             {
@@ -833,7 +845,38 @@ public class InmemoTest {
                     }));
                 }}.build(), true);
             }
+
+            Map<Long, User> users = new HashMap<>();
+            for (long id = 1; id <= USER_COUNT ; id++) {
+                User inmemoUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id));
+                User dbUser = userDao.find(id);
+                Assert.assertEquals(dbUser, inmemoUser);
+                users.put(id, inmemoUser);
+            }
+
+            Inmemo.dropTableIfExists(User.class);
+            Assert.assertTrue(journalFile.isFile());
+            {
+                Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
+                    add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
+                        @Override
+                        public Long get(User tableItem) {
+                            return tableItem.getId();
+                        }
+                    }));
+                }}.build(), true);
+            }
+
+            for (long id = 1; id <= USER_COUNT ; id++) {
+                User inmemoUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id));
+                User dbUser = userDao.find(id);
+                Assert.assertEquals(dbUser, inmemoUser);
+                Assert.assertEquals(users.get(id), inmemoUser);
+            }
         } finally {
+            Assert.assertTrue(journalFile.isFile());
+            Inmemo.deleteJournal(User.class);
+            Assert.assertFalse(journalFile.isFile());
             System.setProperty("Inmemo.UseJournal", "false");
         }
     }
