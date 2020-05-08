@@ -128,7 +128,7 @@ public final class Inmemo {
                 if (waitForPreload) {
                     while (!table.isPreloaded()) {
                         try {
-                            Thread.sleep(TimeUnit.SECONDS.toMillis(1));
+                            Thread.sleep(100L);
                         } catch (InterruptedException ignored) {
                             break;
                         }
