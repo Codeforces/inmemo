@@ -2,7 +2,6 @@ package com.codeforces.inmemo;
 
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
-import org.apache.log4j.Priority;
 import org.jacuzzi.core.Jacuzzi;
 import org.jacuzzi.core.Row;
 import org.jacuzzi.core.RowRoll;
@@ -13,6 +12,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -21,6 +21,8 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 class TableUpdater<T extends HasId> {
     private static final Logger logger = Logger.getLogger(TableUpdater.class);
+    private static final List<Thread> tableUpdaterThreads = Collections.synchronizedList(new ArrayList<>());
+    private static final AtomicInteger tableUpdaterThreadCount = new AtomicInteger(0);
 
     /**
      * Delay after meaningless update try.
@@ -33,10 +35,10 @@ class TableUpdater<T extends HasId> {
     private final Lock updateLock = new ReentrantLock();
 
     private static DataSource dataSource;
-    private static Map<String, DataSource> dataSourceByClazzName = new ConcurrentHashMap<>();
+    private static final Map<String, DataSource> dataSourceByClazzName = new ConcurrentHashMap<>();
     private static final Collection<TableUpdater<? extends HasId>> instances = new ArrayList<>();
 
-    private final Table table;
+    private final Table<?> table;
     private final Thread thread;
     private final String threadName;
     private volatile boolean running;
@@ -64,8 +66,9 @@ class TableUpdater<T extends HasId> {
         typeOracle = TypeOracle.getTypeOracle(table.getClazz());
 
         threadName = "InmemoUpdater#" + table.getClazz();
-        thread = new Thread(new TableUpdaterRunnable(), threadName);
+        thread = new Thread(new TableUpdaterRunnable(this), threadName);
         thread.setDaemon(true);
+        tableUpdaterThreads.add(thread);
 
         logger.info("Started Inmemo table updater thread '" + threadName + "'.");
         startTimeMillis = System.currentTimeMillis();
@@ -256,10 +259,8 @@ class TableUpdater<T extends HasId> {
                     logger.info("Updated entries have id=" + ids + '.');
                 }
 
-                if (!updatedIds.isEmpty()) {
-                    logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
-                            threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
-                }
+                logger.info(String.format("Thread '%s' has updated %d items in %d ms [lastIndicatorValue=" + lastIndicatorValue + "].",
+                        threadName, updatedIds.size(), System.currentTimeMillis() - startTimeMillis));
             }
 
             if (updatedIds.isEmpty() && !table.isPreloaded()) {
@@ -353,7 +354,6 @@ class TableUpdater<T extends HasId> {
         RowRoll rows = null;
 
         if (lastIndicatorValue == null && table.isUseJournal()) {
-            //noinspection unchecked
             RowRoll journalRows = table.readJournal();
             if (journalRows != null && !journalRows.isEmpty()) {
                 rows = journalRows;
@@ -411,22 +411,71 @@ class TableUpdater<T extends HasId> {
         dataSourceByClazzName.put(clazzName, dataSource);
     }
 
-    private class TableUpdaterRunnable implements Runnable {
+    private static final class TableUpdaterRunnable implements Runnable {
+        private final TableUpdater<?> tableUpdater;
+
+        private TableUpdaterRunnable(TableUpdater<?> tableUpdater) {
+            this.tableUpdater = tableUpdater;
+        }
+
         @Override
         public void run() {
+            tableUpdaterThreadCount.incrementAndGet();
             @SuppressWarnings("UnsecureRandomNumberGeneration") Random sleepRandom = new Random();
 
-            while (running) {
+            while (tableUpdater.running) {
                 try {
-                    update(sleepRandom);
+                    tableUpdater.update(sleepRandom);
                 } catch (Exception e) {
                     logger.error("Unexpected " + e.getClass().getName() + " exception in TableUpdaterRunnable of "
-                            + threadName
+                            + tableUpdater.threadName
                             + ": " + e, e);
                 }
             }
 
-            logger.warn("Inmemo update thread for " + table.getClazz().getName() + " finished");
+            tableUpdaterThreadCount.decrementAndGet();
+            logger.warn("Inmemo update thread for " + tableUpdater.table.getClazz().getName() + " finished");
         }
+    }
+
+    private static final class TableUpdaterThreadsPrinterRunnable implements Runnable {
+        @SuppressWarnings("BusyWait")
+        @Override
+        public void run() {
+            while (true) {
+                try {
+                    Thread.sleep(TimeUnit.SECONDS.toMillis(300));
+                } catch (InterruptedException e) {
+                    logger.warn("TableUpdaterThreadsPrinterRunnable stopped because of InterruptedException.");
+                    break;
+                }
+                if (tableUpdaterThreadCount.get() == 0) {
+                    logger.warn("TableUpdaterThreadsPrinterRunnable stopped because of `tableUpdaterThreadCount.get() == 0`.");
+                    break;
+                }
+                logger.info("tableUpdaterThreads.size()=" + tableUpdaterThreads.size() + ".");
+                for (Thread tableUpdaterRunnable : tableUpdaterThreads) {
+                    printStackTrace(tableUpdaterRunnable);
+                }
+            }
+        }
+
+        private void printStackTrace(Thread thread) {
+            StringBuilder result = new StringBuilder();
+            StackTraceElement[] elements = thread.getStackTrace();
+            for (StackTraceElement element : elements) {
+                result.append(thread.getName()).append(": ").append(element.toString()).append('\n');
+            }
+            result.append("\n\n");
+            logger.info(thread.getName() + " stack trace: " + result);
+        }
+    }
+
+    static {
+        Thread tableUpdaterThreadsPrinterThread = new Thread(new TableUpdaterThreadsPrinterRunnable());
+        tableUpdaterThreadsPrinterThread.setDaemon(true);
+        tableUpdaterThreadsPrinterThread.setUncaughtExceptionHandler((t, e)
+                -> logger.error("Uncaught exception [thread=" + t + ", exception=" + e + "]."));
+        tableUpdaterThreadsPrinterThread.start();
     }
 }
