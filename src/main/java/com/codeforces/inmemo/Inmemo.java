@@ -2,6 +2,7 @@ package com.codeforces.inmemo;
 
 import net.sf.cglib.beans.BeanCopier;
 import org.apache.log4j.Logger;
+import org.jacuzzi.core.Row;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -10,8 +11,6 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -115,6 +114,29 @@ public final class Inmemo {
             @Nullable Object initialIndicatorValue,
             @Nonnull Indices<T> indices,
             boolean waitForPreload) {
+        createTable(clazz, indicatorField, initialIndicatorValue, indices, null, waitForPreload);
+    }
+
+    /**
+     * Creates new table, if there is already table for compatible class then doing nothing.
+     *
+     * @param clazz                 Table item class.
+     * @param indicatorField        Item field which will be monitored to increase on each change. Good idea to make it
+     *                              'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'.
+     * @param initialIndicatorValue Initial value of indicator, will be loaded only items with at least
+     *                              {@code initialIndicatorValue}. Use {@code null} to load all the items.
+     * @param indices               Indices built with Indices.Builder.
+     * @param rowFilter             Filter predicate for rows to be processed from DB
+     * @param <T>                   Item class.
+     */
+    @SuppressWarnings("UnusedDeclaration")
+    public static <T extends HasId> void createTable(
+            @Nonnull Class<T> clazz,
+            @Nonnull String indicatorField,
+            @Nullable Object initialIndicatorValue,
+            @Nonnull Indices<T> indices,
+            @Nullable Filter<T> rowFilter,
+            boolean waitForPreload) {
         tablesLock.lock();
 
         try {
@@ -122,7 +144,7 @@ public final class Inmemo {
 
             Table<? extends HasId> table = tables.get(tableClassName);
             if (table == null) {
-                renewTable(clazz, indicatorField, initialIndicatorValue, indices);
+                renewTable(clazz, indicatorField, initialIndicatorValue, indices, rowFilter);
 
                 table = tables.get(tableClassName);
                 if (waitForPreload) {
@@ -149,7 +171,7 @@ public final class Inmemo {
                     return;
                 }
 
-                renewTable(clazz, indicatorField, initialIndicatorValue, indices);
+                renewTable(clazz, indicatorField, initialIndicatorValue, indices, rowFilter);
 
                 table = tables.get(tableClassName);
                 if (waitForPreload) {
@@ -224,8 +246,9 @@ public final class Inmemo {
 
     private static <T extends HasId> void renewTable(Class<T> clazz,
                                                      String indicatorField, Object initialIndicatorValue,
-                                                     Indices<T> indices) {
-        Table<T> table = new Table<>(clazz, indicatorField);
+                                                     Indices<T> indices,
+                                                     Filter<T> rowFilter) {
+        Table<T> table = new Table<>(clazz, indicatorField, rowFilter);
         table.createUpdater(initialIndicatorValue);
 
         for (Index<T, ?> index : indices.getIndices()) {
@@ -498,6 +521,11 @@ public final class Inmemo {
         }
 
         getTableByClass(clazz).deleteJournal();
+    }
+
+    public interface Filter<T> {
+        boolean testRow(Row row);
+        boolean testItem(T item);
     }
 
     private static final class ClassPair {

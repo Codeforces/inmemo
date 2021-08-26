@@ -1,10 +1,16 @@
 package com.codeforces.inmemo;
 
+import gnu.trove.iterator.TLongObjectIterator;
+import gnu.trove.map.TLongObjectMap;
+import gnu.trove.map.hash.TLongObjectHashMap;
 import org.apache.log4j.Logger;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -21,7 +27,7 @@ public class Index<T extends HasId, V> {
     private final IndexGetter<T, V> indexGetter;
 
     // Actually, it has type ConcurrentMap<V, Map<Long, T>> but can't be used because of non-null keys in ConcurrentHashMap.
-    private final ConcurrentMap<Object, Map<Long, T>> map;
+    private final ConcurrentMap<Object, TLongObjectMap<T>> map;
 
     // Actually, it has type ConcurrentMap<V, >> but can't be used because of non-null keys in ConcurrentHashMap.
     private final ConcurrentMap<Object, T> uniqueMap;
@@ -116,7 +122,8 @@ public class Index<T extends HasId, V> {
         } else {
             assert map != null;
             if (!map.containsKey(value)) {
-                map.putIfAbsent(value, new ConcurrentHashMap<>());
+                //map.putIfAbsent(value, new ConcurrentHashMap<>());
+                map.putIfAbsent(value, new TLongObjectHashMap<>(1));
             }
 
             map.get(value).put(tableItem.getId(), tableItem);
@@ -141,7 +148,7 @@ public class Index<T extends HasId, V> {
         Object wrappedValue = wrapValue(value);
 
         assert map != null;
-        Map<Long, T> valueMap = map.get(wrappedValue);
+        TLongObjectMap<T> valueMap = map.get(wrappedValue);
 
         if ((valueMap == null || valueMap.isEmpty()) && emergencyDatabaseHelper == null) {
             return Collections.emptyList();
@@ -149,7 +156,7 @@ public class Index<T extends HasId, V> {
 
         Collection<T> tableItems = (valueMap == null || valueMap.isEmpty())
                 ? table.findAndUpdateByEmergencyQueryFields(emergencyDatabaseHelper.getEmergencyQueryFields(value))
-                : valueMap.values();
+                : values(valueMap);
 
         List<T> result = new ArrayList<>(tableItems.size());
 
@@ -159,6 +166,15 @@ public class Index<T extends HasId, V> {
             }
         }
 
+        return result;
+    }
+
+    private Collection<T> values(TLongObjectMap<T> map) {
+        List<T> result = new ArrayList<>(map.size());
+        for (TLongObjectIterator<T> i = map.iterator(); i.hasNext(); ) {
+            i.advance();
+            result.add(i.value());
+        }
         return result;
     }
 
@@ -197,7 +213,7 @@ public class Index<T extends HasId, V> {
             }
         } else {
             assert map != null;
-            Map<Long, T> valueMap = map.get(wrappedValue);
+            TLongObjectMap<T> valueMap = map.get(wrappedValue);
 
             if ((valueMap == null || valueMap.isEmpty()) && emergencyDatabaseHelper == null) {
                 return null;
@@ -205,7 +221,7 @@ public class Index<T extends HasId, V> {
 
             Collection<T> tableItems = (valueMap == null || valueMap.isEmpty())
                     ? table.findAndUpdateByEmergencyQueryFields(emergencyDatabaseHelper.getEmergencyQueryFields(value))
-                    : valueMap.values();
+                    : values(valueMap);
 
             List<T> result = new ArrayList<>(2);
 
