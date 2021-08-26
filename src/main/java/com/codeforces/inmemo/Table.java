@@ -39,6 +39,7 @@ public class Table<T extends HasId> {
     private final String clazzSpec;
     private final String indicatorField;
     private final String databaseIndex;
+    private final Inmemo.Filter<T> rowFilter;
 
     private TableUpdater<T> tableUpdater;
     private volatile boolean preloaded;
@@ -57,7 +58,7 @@ public class Table<T extends HasId> {
 
         try {
             PrintWriter statusWriter = new PrintWriter(new FileOutputStream(new File(journalsDir, "status")));
-            statusWriter.println(new Date().toString());
+            statusWriter.println(new Date());
             statusWriter.close();
         } catch (Exception e) {
             throw new RuntimeException("Journals directory '"
@@ -67,7 +68,7 @@ public class Table<T extends HasId> {
         Table.journalsDir = journalsDir;
     }
 
-    Table(Class<T> clazz, String indicatorField) {
+    Table(Class<T> clazz, String indicatorField, Inmemo.Filter<T> rowFilter) {
         this.clazz = clazz;
         if (indicatorField.contains("@")) {
             String[] tokens = INDICATOR_FIELD_SPLIT_PATTERN.split(indicatorField);
@@ -79,6 +80,7 @@ public class Table<T extends HasId> {
         }
         clazzSpec = ReflectionUtil.getTableClassSpec(clazz);
         ids = Inmemo.getNoSizeSupportClasses().contains(clazz) ? null : new TLongHashSet();
+        this.rowFilter = rowFilter;
     }
 
     void createUpdater(Object initialIndicatorValue) {
@@ -169,7 +171,9 @@ public class Table<T extends HasId> {
         if (clazzSpec.equals(itemClassSpec)) {
             T tableItem = ReflectionUtil.newInstance(clazz);
             ReflectionUtil.copyProperties(item, tableItem);
-            internalInsertOrUpdate(tableItem, row);
+            if (rowFilter == null || (rowFilter.testItem(tableItem) && (row == null || rowFilter.testRow(row)))) {
+                internalInsertOrUpdate(tableItem, row);
+            }
         } else {
             throw new InmemoException("Table class is incompatible with the class of object [tableClass=" + clazz
                     + ", clazz=" + itemClass + "].");
@@ -183,8 +187,10 @@ public class Table<T extends HasId> {
     }
 
     void insertOrUpdate(Row row) {
-        for (RowListener rowListener : rowListeners) {
-            rowListener.insertOrUpdate(row);
+        if (rowFilter == null || rowFilter.testRow(row)) {
+            for (RowListener rowListener : rowListeners) {
+                rowListener.insertOrUpdate(row);
+            }
         }
     }
 

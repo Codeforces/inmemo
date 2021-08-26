@@ -6,11 +6,12 @@ import com.codeforces.inmemo.model.User;
 import com.codeforces.inmemo.model.Wrapper;
 import com.codeforces.inmemo.model.Wrapper.a;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
+import org.apache.commons.lang3.RandomUtils;
+import org.jacuzzi.core.Row;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import javax.annotation.Nullable;
 import javax.sql.DataSource;
 import java.io.File;
 import java.io.IOException;
@@ -77,12 +78,7 @@ public class InmemoTest {
         // Create table.
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
-                    @Override
-                    public Long get(User tableItem) {
-                        return tableItem.getId();
-                    }
-                }));
+                add(Index.create("ID", Long.class, User::getId));
             }}.build(), true);
         }
 
@@ -103,6 +99,57 @@ public class InmemoTest {
     }
 
     @Test
+    public void testRowFilter() throws InterruptedException {
+        Inmemo.dropTableIfExists(User.class);
+
+        Inmemo.Filter<User> adminFilter = new Inmemo.Filter<User>() {
+            @Override
+            public boolean testRow(Row row) {
+                return Boolean.TRUE.equals(row.get("ADMIN"));
+            }
+
+            @Override
+            public boolean testItem(User user) {
+                return user.isAdmin();
+            }
+        };
+        Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
+                    add(Index.create("ID", Long.class, User::getId));
+                }}.build(), adminFilter, true);
+        int size = Inmemo.size(User.class);
+        org.junit.Assert.assertTrue(size >= USER_COUNT * 0.45 && size <= USER_COUNT * 0.55);
+
+        for (User user : userDao.findAll()) {
+            Inmemo.insertOrUpdate(user);
+        }
+        org.junit.Assert.assertEquals(size,  Inmemo.size(User.class));
+
+        List<User> admins = new ArrayList<>();
+        List<User> nonAdmins = new ArrayList<>();
+        for (User user : userDao.findAll()) {
+            if (user.isAdmin()) {
+                admins.add(user);
+            } else {
+                nonAdmins.add(user);
+            }
+        }
+
+        User randomAdmin = admins.get(RandomUtils.nextInt(0, admins.size()));
+        randomAdmin.setHandle("???");
+        userDao.update(randomAdmin);
+        Inmemo.insertOrUpdateByIds(User.class, randomAdmin.getId());
+        User inmemoRandomAdmin = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", randomAdmin.getId()));
+        org.junit.Assert.assertEquals(randomAdmin.getHandle(), inmemoRandomAdmin.getHandle());
+
+        User randomNonAdmin = nonAdmins.get(RandomUtils.nextInt(0, nonAdmins.size()));
+        randomNonAdmin.setHandle("???");
+        userDao.update(randomNonAdmin);
+        Inmemo.insertOrUpdateByIds(User.class, randomNonAdmin.getId());
+        User inmemoRandomNonAdmin = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", randomNonAdmin.getId()));
+        org.junit.Assert.assertNull(inmemoRandomNonAdmin);
+    }
+
+    @Test
     public void testCommon() throws InterruptedException {
         Inmemo.dropTableIfExists(User.class);
 
@@ -115,26 +162,11 @@ public class InmemoTest {
         // Create table.
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
-                    @Override
-                    public Long get(User user) {
-                        return user.getId();
-                    }
-                }));
+                add(Index.create("ID", Long.class, User::getId));
 
-                add(Index.create("handle", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User user) {
-                        return user.getHandle();
-                    }
-                }));
+                add(Index.create("handle", String.class, User::getHandle));
 
-                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User user) {
-                        return user.getHandle().substring(0, 1);
-                    }
-                }));
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, user -> user.getHandle().substring(0, 1)));
             }}.build(), true);
         }
         System.out.println(2);
@@ -147,12 +179,7 @@ public class InmemoTest {
 
         // Exactly one user with id=123.
         {
-            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            });
+            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), user -> true);
             Assert.assertEquals(1, users.size());
             Assert.assertEquals(123L, users.get(0).getId());
         }
@@ -160,22 +187,12 @@ public class InmemoTest {
 
         // Tests that there is no user[id=USER_COUNT + 1], inserts it, waits, tests that the table contains it.
         {
-            Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            }).size());
+            Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 1), user -> true).size());
 
             userDao.insertRandom();
             Thread.sleep(BASE_SLEEP_MS);
 
-            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 1), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            });
+            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 1), user -> true);
             Assert.assertEquals(1, users.size());
             Assert.assertEquals(USER_COUNT + 1, users.get(0).getId());
         }
@@ -183,22 +200,12 @@ public class InmemoTest {
 
         // Tests that there is no user[id=USER_COUNT + 2], inserts it, enforces update, tests that the table contains it.
         {
-            Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            }).size());
+            Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), user -> true).size());
 
             userDao.insertRandom();
             Inmemo.update(User.class);
 
-            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            });
+            List<User> users = Inmemo.find(User.class, new IndexConstraint<>("ID", USER_COUNT + 2), user -> true);
             Assert.assertEquals(1, users.size());
             Assert.assertEquals(USER_COUNT + 2, users.get(0).getId());
         }
@@ -206,19 +213,9 @@ public class InmemoTest {
 
         // Tests using second index that the number of users with first letter 'e' in handle is expected.
         {
-            long eUsers1 = Inmemo.findCount(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER", "e"), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            });
+            long eUsers1 = Inmemo.findCount(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER", "e"), user -> true);
 
-            long eUsers2 = Inmemo.find(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER", "e"), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            }).size();
+            long eUsers2 = Inmemo.find(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER", "e"), user -> true).size();
 
             int expectedCount = userDao.findCountByHandlePrefix("e");
             Assert.assertEquals(expectedCount, eUsers1);
@@ -228,12 +225,7 @@ public class InmemoTest {
 
         // Tests matcher.
         {
-            long xyUsers = Inmemo.findCount(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER", "x"), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return user.getHandle().charAt(1) == 'y';
-                }
-            });
+            long xyUsers = Inmemo.findCount(User.class, new IndexConstraint<>("FIRST_HANDLE_LETTER", "x"), user -> user.getHandle().charAt(1) == 'y');
 
             Assert.assertEquals(userDao.findCountByHandlePrefix("xy"), xyUsers);
         }
@@ -241,30 +233,15 @@ public class InmemoTest {
 
         // Tests that if we change user state in memory, it will no affect table unless we use insertOrUpdate.
         {
-            User user13 = Inmemo.find(User.class, new IndexConstraint<>("ID", 13L), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            }).get(0);
+            User user13 = Inmemo.find(User.class, new IndexConstraint<>("ID", 13L), user -> true).get(0);
 
             user13.setHandle("handle13");
 
-            org.junit.Assert.assertThat(user13.getHandle(), not(Inmemo.find(User.class, new IndexConstraint<>("ID", 13L), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            }).get(0).getHandle()));
+            org.junit.Assert.assertThat(user13.getHandle(), not(Inmemo.find(User.class, new IndexConstraint<>("ID", 13L), user -> true).get(0).getHandle()));
 
             Inmemo.insertOrUpdate(user13);
 
-            org.junit.Assert.assertThat(user13.getHandle(), is(Inmemo.find(User.class, new IndexConstraint<>("ID", 13L), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            }).get(0).getHandle()));
+            org.junit.Assert.assertThat(user13.getHandle(), is(Inmemo.find(User.class, new IndexConstraint<>("ID", 13L), user -> true).get(0).getHandle()));
         }
         System.out.println(9);
 
@@ -399,24 +376,9 @@ public class InmemoTest {
         // Create table.
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
-                    @Override
-                    public Long get(User user) {
-                        return user.getId();
-                    }
-                }));
-                add(Index.createUnique("handle", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User user) {
-                        return user.getHandle();
-                    }
-                }));
-                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User tableItem) {
-                        return tableItem.getHandle().substring(0, 1);
-                    }
-                }));
+                add(Index.createUnique("ID", Long.class, User::getId));
+                add(Index.createUnique("handle", String.class, User::getHandle));
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, tableItem -> tableItem.getHandle().substring(0, 1)));
             }}.build(), true);
         }
 
@@ -427,22 +389,12 @@ public class InmemoTest {
 
         // Exactly one user with id=123.
         {
-            Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return true;
-                }
-            }).size());
+            Assert.assertEquals(1, Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), user -> true).size());
         }
 
         // No one user with id=123 and false matcher.
         {
-            Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), new Matcher<User>() {
-                @Override
-                public boolean match(User user) {
-                    return false;
-                }
-            }).size());
+            Assert.assertEquals(0, Inmemo.find(User.class, new IndexConstraint<>("ID", 123L), user -> false).size());
         }
 
         // Exactly one user with id=123.
@@ -504,23 +456,13 @@ public class InmemoTest {
             User existingUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id));
             final String handle = existingUser.getHandle();
             User notFoundUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id),
-                    new Matcher<User>() {
-                        @Override
-                        public boolean match(User user) {
-                            return !user.getHandle().equals(handle);
-                        }
-                    }
+                    user -> !user.getHandle().equals(handle)
             );
 
             Assert.assertNull(notFoundUser);
 
             List<User> emptyUserList = Inmemo.find(User.class, new IndexConstraint<>("ID", id),
-                    new Matcher<User>() {
-                        @Override
-                        public boolean match(User user) {
-                            return !user.getHandle().equals(handle);
-                        }
-                    }
+                    user -> !user.getHandle().equals(handle)
             );
 
             Assert.assertTrue(emptyUserList.isEmpty());
@@ -539,43 +481,15 @@ public class InmemoTest {
         // Create table.
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
-                            @Override
-                            public Long get(User user) {
-                                return user.getId();
-                            }
-                        }, new Index.EmergencyDatabaseHelper<Long>() {
-                            @Override
-                            public Object[] getEmergencyQueryFields(@Nullable Long indexValue) {
-                                return new Object[]{"ID", indexValue};
-                            }
-                        }
+                add(Index.createUnique("ID", Long.class, User::getId, indexValue -> new Object[]{"ID", indexValue}
                 ));
-                add(Index.createUnique("handle", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User user) {
-                        return user.getHandle();
-                    }
-                }));
-                add(Index.createUnique("idAndHandle", String.class, new IndexGetter<User, String>() {
-                            @Override
-                            public String get(User user) {
-                                return user.getId() + "," + user.getHandle();
-                            }
-                        }, new Index.EmergencyDatabaseHelper<String>() {
-                            @Override
-                            public Object[] getEmergencyQueryFields(@Nullable String indexValue) {
-                                String[] tokens = indexValue.split(",");
-                                return new Object[]{"ID", Long.valueOf(tokens[0]), "HANDLE", tokens[1]};
-                            }
-                        }
+                add(Index.createUnique("handle", String.class, User::getHandle));
+                add(Index.createUnique("idAndHandle", String.class, user -> user.getId() + "," + user.getHandle(), indexValue -> {
+                    String[] tokens = indexValue.split(",");
+                    return new Object[]{"ID", Long.valueOf(tokens[0]), "HANDLE", tokens[1]};
+                }
                 ));
-                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User tableItem) {
-                        return tableItem.getHandle().substring(0, 1);
-                    }
-                }));
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, tableItem -> tableItem.getHandle().substring(0, 1)));
             }}.build(), true);
         }
 
@@ -631,46 +545,16 @@ public class InmemoTest {
         // Create table.
         {
             Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
-                            @Override
-                            public Long get(User tableItem) {
-                                return tableItem.getId();
-                            }
-                        }, new Index.EmergencyDatabaseHelper<Long>() {
-                            @Override
-                            public Object[] getEmergencyQueryFields(@Nullable Long id) {
-                                return new Object[]{"id", id};
-                            }
-                        }
+                add(Index.createUnique("ID", Long.class, User::getId, id -> new Object[]{"id", id}
                         )
                 );
 
-                add(Index.create("handle", String.class, new IndexGetter<User, String>() {
-                            @Override
-                            public String get(User user) {
-                                return user.getHandle();
-                            }
-                        }, new Index.EmergencyDatabaseHelper<String>() {
-                            @Override
-                            public Object[] getEmergencyQueryFields(@Nullable String handle) {
-                                return new Object[]{"handle", handle};
-                            }
-                        }
+                add(Index.create("handle", String.class, User::getHandle, handle -> new Object[]{"handle", handle}
                 ));
 
-                add(Index.create("handle2", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User user) {
-                        return user.getHandle();
-                    }
-                }));
+                add(Index.create("handle2", String.class, User::getHandle));
 
-                add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
-                    @Override
-                    public String get(User tableItem) {
-                        return tableItem.getHandle().substring(0, 1);
-                    }
-                }));
+                add(Index.create("FIRST_HANDLE_LETTER", String.class, tableItem -> tableItem.getHandle().substring(0, 1)));
             }}.build(), true);
         }
 
@@ -741,74 +625,38 @@ public class InmemoTest {
 
         // Create table.
         Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-            add(Index.createUnique("ID", Long.class, new IndexGetter<User, Long>() {
-                        @Override
-                        public Long get(User tableItem) {
-                            return tableItem.getId();
-                        }
-                    }, new Index.EmergencyDatabaseHelper<Long>() {
-                        @Override
-                        public Object[] getEmergencyQueryFields(@Nullable Long id) {
-                            return new Object[]{"id", id};
-                        }
-                    }
+            add(Index.createUnique("ID", Long.class, User::getId, id -> new Object[]{"id", id}
                     )
             );
 
-            add(Index.create("handle", String.class, new IndexGetter<User, String>() {
-                        @Override
-                        public String get(User user) {
-                            return user.getHandle();
-                        }
-                    }, new Index.EmergencyDatabaseHelper<String>() {
-                        @Override
-                        public Object[] getEmergencyQueryFields(@Nullable String handle) {
-                            return new Object[]{"handle", handle};
-                        }
-                    }
+            add(Index.create("handle", String.class, User::getHandle, handle -> new Object[]{"handle", handle}
             ));
 
-            add(Index.create("handle2", String.class, new IndexGetter<User, String>() {
-                @Override
-                public String get(User user) {
-                    return user.getHandle();
-                }
-            }));
+            add(Index.create("handle2", String.class, User::getHandle));
 
-            add(Index.create("FIRST_HANDLE_LETTER", String.class, new IndexGetter<User, String>() {
-                @Override
-                public String get(User tableItem) {
-                    return tableItem.getHandle().substring(0, 1);
-                }
-            }));
+            add(Index.create("FIRST_HANDLE_LETTER", String.class, tableItem -> tableItem.getHandle().substring(0, 1)));
         }}.build(), false);
 
         ExecutorService executorService = Executors.newFixedThreadPool(10);
 
         for (int i = 0; i < 10; ++i) {
-            executorService.submit(new Runnable() {
-                @Override
-                public void run() {
-                    for (Long userId : userIds) {
-                        try {
-                            User user = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", userId));
-                            Assert.assertNotNull(user);
-                        } catch (InmemoException e) {
-                            Assert.assertTrue(e.getMessage().contains("Unable to find table for class name"));
-                        }
+            executorService.submit(() -> {
+                for (Long userId : userIds) {
+                    try {
+                        User user = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", userId));
+                        Assert.assertNotNull(user);
+                    } catch (InmemoException e) {
+                        Assert.assertTrue(e.getMessage().contains("Unable to find table for class name"));
                     }
                 }
             });
 
-            executorService.submit(new Runnable() {
-                @Override
-                public void run() {
-                    for (Long userId : userIds) {
-                        try {
-                            Inmemo.insertOrUpdateByIds(User.class, userId);
-                        } catch (InmemoException e) {
-                            Assert.assertTrue(e.getMessage().contains("Unable to find table for class name"));
-                        }
+            executorService.submit(() -> {
+                for (Long userId : userIds) {
+                    try {
+                        Inmemo.insertOrUpdateByIds(User.class, userId);
+                    } catch (InmemoException e) {
+                        Assert.assertTrue(e.getMessage().contains("Unable to find table for class name"));
                     }
                 }
             });
@@ -837,12 +685,7 @@ public class InmemoTest {
             // Create table.
             {
                 Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                    add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
-                        @Override
-                        public Long get(User tableItem) {
-                            return tableItem.getId();
-                        }
-                    }));
+                    add(Index.create("ID", Long.class, User::getId));
                 }}.build(), true);
             }
 
@@ -858,12 +701,7 @@ public class InmemoTest {
             Assert.assertTrue(journalFile.isFile());
             {
                 Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                    add(Index.create("ID", Long.class, new IndexGetter<User, Long>() {
-                        @Override
-                        public Long get(User tableItem) {
-                            return tableItem.getId();
-                        }
-                    }));
+                    add(Index.create("ID", Long.class, User::getId));
                 }}.build(), true);
             }
 
