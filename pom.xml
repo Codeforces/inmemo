@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.codeforces.inmemo</groupId>
     <artifactId>inmemo</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>2.0-SNAPSHOT</version>
     <packaging>jar</packaging>
     <name>inmemo</name>
     <url>https://github.com/Codeforces/inmemo</url>
@@ -17,7 +17,7 @@
             <roles>
                 <role>owner, author</role>
             </roles>
-            <timezone>+4</timezone>
+            <timezone>+3</timezone>
             <properties/>
         </developer>
     </developers>
@@ -44,12 +44,37 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-repository-plugin</artifactId>
+                <version>2.4</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.codehaus.plexus</groupId>
+                        <artifactId>plexus-archiver</artifactId>
+                        <version>4.2.5</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.6.1</version>
+                <version>3.8.1</version>
                 <configuration>
                     <source>1.8</source>
                     <target>1.8</target>
                     <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>2.22.2</version>
+                <configuration>
+                    <argLine>-Dfile.encoding=UTF-8</argLine>
+                    <argLine>-Xmx1200M</argLine>
+                    <!-- Uncomment to build with JDK 9+ -->
+                    <!--
+                    <argLine>&#45;&#45;add&#45;opens java.base/java.lang=ALL&#45;UNNAMED &#45;&#45;add&#45;opens java.base/java.util=ALL&#45;UNNAMED &#45;&#45;add&#45;opens java.base/java.io=ALL&#45;UNNAMED</argLine>
+                    -->
                 </configuration>
             </plugin>
         </plugins>
@@ -58,17 +83,12 @@
         <dependency>
             <groupId>jacuzzi</groupId>
             <artifactId>jacuzzi</artifactId>
-            <version>0.0.36-SNAPSHOT</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework</groupId>
-            <artifactId>spring-beans</artifactId>
-            <version>4.2.6.RELEASE</version>
+            <version>0.1.0-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>commons-beanutils</groupId>
             <artifactId>commons-beanutils</artifactId>
-            <version>1.9.2</version>
+            <version>1.9.4</version>
         </dependency>
         <dependency>
             <groupId>net.sf.trove4j</groupId>
@@ -78,19 +98,19 @@
         <dependency>
             <groupId>org.hsqldb</groupId>
             <artifactId>hsqldb</artifactId>
-            <version>2.3.4</version>
+            <version>2.5.2</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>4.11</version>
+            <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>c3p0</groupId>
+            <groupId>com.mchange</groupId>
             <artifactId>c3p0</artifactId>
-            <version>0.9.1.2</version>
+            <version>0.9.5.5</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
