@@ -17,6 +17,8 @@ jobs:
         with:
           java-version: 17
           distribution: "adopt"
+      - name: Setup settings.xml
+        run: cp settings.xml ~/.m2/settings.xml
       - name: Test
         run: |
           mvn --batch-mode test
@@ -33,6 +35,8 @@ jobs:
         with:
           java-version: "17"
           distribution: "adopt"
+      - name: Setup settings.xml
+        run: cp settings.xml ~/.m2/settings.xml
       - name: Deploy
         run: |
           mvn --batch-mode deploy -DskipTests
