@@ -6,10 +6,13 @@ import org.apache.log4j.Logger;
 import org.jacuzzi.core.ArrayMap;
 import org.jacuzzi.core.Row;
 import org.jacuzzi.core.RowRoll;
+import org.xerial.snappy.SnappyInputStream;
+import org.xerial.snappy.SnappyOutputStream;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.io.*;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -57,7 +60,7 @@ public class Table<T extends HasId> {
         }
 
         try {
-            PrintWriter statusWriter = new PrintWriter(new FileOutputStream(new File(journalsDir, "status")));
+            PrintWriter statusWriter = new PrintWriter(Files.newOutputStream(new File(journalsDir, "status").toPath()));
             statusWriter.println(new Date());
             statusWriter.close();
         } catch (Exception e) {
@@ -292,7 +295,7 @@ public class Table<T extends HasId> {
     }
 
     void deleteJournal() throws IOException {
-        File journalFile = new File(journalsDir, clazz.getSimpleName() + ".inmemo");
+        File journalFile = new File(journalsDir, getInmemoFilename());
         if (journalFile.isFile()) {
             if (!journalFile.delete()) {
                 String message = "Journal has not been deleted [table='" + clazz.getSimpleName() + "'].";
@@ -302,6 +305,10 @@ public class Table<T extends HasId> {
         }
     }
 
+    private String getInmemoFilename() {
+        return clazz.getSimpleName() + ".inmemo";
+    }
+
     void writeJournal() throws IOException {
         if (useJournal && journal != null) {
             if (journal.isEmpty()) {
@@ -309,12 +316,12 @@ public class Table<T extends HasId> {
                 return;
             }
 
-            File journalFile = new File(journalsDir, clazz.getSimpleName() + ".inmemo");
+            File journalFile = new File(journalsDir, getInmemoFilename());
             lock.lock();
             try {
                 long startTimeMillis = System.currentTimeMillis();
-                try (OutputStream outputStream = new BufferedOutputStream(
-                        new FileOutputStream(journalFile), JOURNAL_STREAM_BUFFER_SIZE)) {
+                try (OutputStream outputStream = new SnappyOutputStream(new BufferedOutputStream(
+                        Files.newOutputStream(journalFile.toPath()), JOURNAL_STREAM_BUFFER_SIZE))) {
                     ArrayMap.writeRowRoll(outputStream, journal);
                 }
                 long writeRowRollTimeMillis = System.currentTimeMillis() - startTimeMillis;
@@ -333,12 +340,13 @@ public class Table<T extends HasId> {
             return null;
         }
 
-        File journalFile = new File(journalsDir, clazz.getSimpleName() + ".inmemo");
+        File journalFile = new File(journalsDir, getInmemoFilename());
         if (journalFile.isFile()) {
             long startTimeMillis = System.currentTimeMillis();
             InputStream inputStream = null;
             try {
-                inputStream = new BufferedInputStream(new FileInputStream(journalFile), JOURNAL_STREAM_BUFFER_SIZE);
+                inputStream = new SnappyInputStream(new BufferedInputStream(
+                        Files.newInputStream(journalFile.toPath()), JOURNAL_STREAM_BUFFER_SIZE));
                 RowRoll rowRoll = ArrayMap.readRowRoll(inputStream);
                 long durationTimeMillis = System.currentTimeMillis() - startTimeMillis;
                 logger.info("Journal binary data has been read and parsed in "
