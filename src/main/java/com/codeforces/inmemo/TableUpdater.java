@@ -372,10 +372,11 @@ class TableUpdater<T extends HasId> {
                     if (updateCount == null) {
                         trulyUpdatedIds.add(id);
                         updateCount = 1;
-                    } else {
-                        updateCount += 1;
+                        lastEntityIdsUpdateCount.put(id, updateCount);
+                    } else if (updateCount < getMaxUpdateSameIndicatorTimes()) {
+                        updateCount++;
+                        lastEntityIdsUpdateCount.put(id, updateCount);
                     }
-                    lastEntityIdsUpdateCount.put(id, updateCount);
                 }
             }
 
