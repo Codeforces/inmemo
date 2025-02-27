@@ -93,8 +93,10 @@ class TableUpdater<T extends HasId> {
 
     @SuppressWarnings("UnusedDeclaration")
     static void stop() {
-        for (TableUpdater<? extends HasId> instance : instances) {
-            instance.running = false;
+        synchronized (instances) {
+            for (TableUpdater<? extends HasId> instance : instances) {
+                instance.running = false;
+            }
         }
     }
 
@@ -527,14 +529,18 @@ class TableUpdater<T extends HasId> {
                             + " InterruptedException.");
                     break;
                 }
+
                 if (tableUpdaterThreadCount.get() == 0) {
                     logger.warn("TableUpdaterThreadsPrinterRunnable stopped because of"
                             + " `tableUpdaterThreadCount.get() == 0`.");
                     break;
                 }
-                logger.info("tableUpdaterThreads.size()=" + tableUpdaterThreads.size() + ".");
-                for (Thread tableUpdaterRunnable : tableUpdaterThreads) {
-                    printStackTrace(tableUpdaterRunnable);
+
+                synchronized (tableUpdaterThreads) {
+                    logger.info("tableUpdaterThreads.size()=" + tableUpdaterThreads.size() + ".");
+                    for (Thread tableUpdaterRunnable : tableUpdaterThreads) {
+                        printStackTrace(tableUpdaterRunnable);
+                    }
                 }
             }
         }
