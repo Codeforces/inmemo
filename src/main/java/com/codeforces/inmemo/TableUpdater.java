@@ -36,7 +36,7 @@ class TableUpdater<T extends HasId> {
     private static final long RESCAN_TIME_MILLIS = 750;
 
     private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 2_000_000;
-    private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 5;
+    private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 10;
 
     private final Lock updateLock = new ReentrantLock();
 
