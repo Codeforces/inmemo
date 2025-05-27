@@ -99,6 +99,10 @@ public class User implements HasId {
         this.tShirtSize = tShirtSize;
     }
 
+    public int getSomething(int arg) {
+        return arg + 2;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
