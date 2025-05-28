@@ -103,6 +103,12 @@ public class User implements HasId {
         return arg + 2;
     }
 
+    public int getSomethingWithTwoArgs(int arg1, int arg2) {
+        return arg1 + arg2;
+    }
+
+    public void setSomething() {}
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
