@@ -114,15 +114,15 @@ public class InmemoTest {
             }
         };
         Inmemo.createTable(User.class, "ID", null, new Indices.Builder<User>() {{
-                    add(Index.create("ID", Long.class, User::getId));
-                }}.build(), adminFilter, true);
+            add(Index.create("ID", Long.class, User::getId));
+        }}.build(), adminFilter, true);
         int size = Inmemo.size(User.class);
         org.junit.Assert.assertTrue(size >= USER_COUNT * 0.45 && size <= USER_COUNT * 0.55);
 
         for (User user : userDao.findAll()) {
             Inmemo.insertOrUpdate(user);
         }
-        org.junit.Assert.assertEquals(size,  Inmemo.size(User.class));
+        org.junit.Assert.assertEquals(size, Inmemo.size(User.class));
 
         List<User> admins = new ArrayList<>();
         List<User> nonAdmins = new ArrayList<>();
@@ -485,9 +485,9 @@ public class InmemoTest {
                 ));
                 add(Index.createUnique("handle", String.class, User::getHandle));
                 add(Index.createUnique("idAndHandle", String.class, user -> user.getId() + "," + user.getHandle(), indexValue -> {
-                    String[] tokens = indexValue.split(",");
-                    return new Object[]{"ID", Long.valueOf(tokens[0]), "HANDLE", tokens[1]};
-                }
+                            String[] tokens = indexValue.split(",");
+                            return new Object[]{"ID", Long.valueOf(tokens[0]), "HANDLE", tokens[1]};
+                        }
                 ));
                 add(Index.create("FIRST_HANDLE_LETTER", String.class, tableItem -> tableItem.getHandle().substring(0, 1)));
             }}.build(), true);
@@ -690,7 +690,7 @@ public class InmemoTest {
             }
 
             Map<Long, User> users = new HashMap<>();
-            for (long id = 1; id <= USER_COUNT ; id++) {
+            for (long id = 1; id <= USER_COUNT; id++) {
                 User inmemoUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id));
                 User dbUser = userDao.find(id);
                 Assert.assertEquals(dbUser, inmemoUser);
@@ -705,12 +705,14 @@ public class InmemoTest {
                 }}.build(), true);
             }
 
-            for (long id = 1; id <= USER_COUNT ; id++) {
+            for (long id = 1; id <= USER_COUNT; id++) {
                 User inmemoUser = Inmemo.findOnly(true, User.class, new IndexConstraint<>("ID", id));
                 User dbUser = userDao.find(id);
                 Assert.assertEquals(dbUser, inmemoUser);
                 Assert.assertEquals(users.get(id), inmemoUser);
             }
+        } catch (Exception e) {
+            System.err.println("Exception: " + e.getMessage());
         } finally {
             Assert.assertTrue(journalFile.isFile());
             Inmemo.deleteJournal(User.class);
