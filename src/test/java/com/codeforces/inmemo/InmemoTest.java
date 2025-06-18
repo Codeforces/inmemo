@@ -712,7 +712,8 @@ public class InmemoTest {
                 Assert.assertEquals(users.get(id), inmemoUser);
             }
         } catch (Exception e) {
-            System.err.println("Exception: " + e.getMessage());
+            System.err.println("Unexpected exception: " + e.getMessage());
+            throw new RuntimeException("Unexpected exception: " + e.getMessage(), e);
         } finally {
             Assert.assertTrue(journalFile.isFile());
             Inmemo.deleteJournal(User.class);
