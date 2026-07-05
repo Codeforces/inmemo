@@ -17,6 +17,13 @@ jobs:
         with:
           java-version: 17
           distribution: "adopt"
+      - name: Check LF line endings
+        shell: bash
+        run: |
+          if git grep -I -l $'\r' -- .; then
+            echo "CR characters found in tracked text files. Use LF line endings." >&2
+            exit 1
+          fi
       - name: Setup settings.xml
         run: cp settings.xml ~/.m2/settings.xml
       - name: Test
