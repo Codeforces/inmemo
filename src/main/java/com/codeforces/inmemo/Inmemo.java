@@ -35,6 +35,8 @@ public final class Inmemo {
     private static final ConcurrentMap<ClassPair, BeanCopier> beanCopiers = new ConcurrentHashMap<>();
     private static volatile boolean debug;
     private static final Set<Class<?>> noSizeSupportClasses = new HashSet<>();
+    private static final Set<String> noJournalSupportTableClassNames
+            = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     private Inmemo() {
         // No operations.
@@ -92,8 +94,53 @@ public final class Inmemo {
         noSizeSupportClasses.add(clazz);
     }
 
+    /**
+     * Disables journal support for a table class. The first call for a class
+     * must be made before createTable; repeated calls are always no-op.
+     *
+     * @param clazz Table item class.
+     */
+    public static void unsetJournalSupport(@Nonnull Class<?> clazz) {
+        String tableClassName = ReflectionUtil.getTableClassName(clazz);
+        tablesLock.lock();
+        try {
+            if (noJournalSupportTableClassNames.contains(tableClassName)) {
+                return;
+            }
+            if (tables.containsKey(tableClassName)) {
+                throw new IllegalStateException("Inmemo.unsetJournalSupport(clazz) must be called"
+                        + " before Inmemo.createTable [clazz=" + tableClassName + "].");
+            }
+            noJournalSupportTableClassNames.add(tableClassName);
+        } finally {
+            tablesLock.unlock();
+        }
+    }
+
     static Set<Class<?>> getNoSizeSupportClasses() {
         return noSizeSupportClasses;
+    }
+
+    static boolean isJournalSupportUnset(@Nonnull Class<?> clazz) {
+        return noJournalSupportTableClassNames.contains(ReflectionUtil.getTableClassName(clazz));
+    }
+
+    static <T extends HasId> void putTableForUnsetJournalSupportTestOnly(Class<T> clazz) {
+        tablesLock.lock();
+        try {
+            tables.put(ReflectionUtil.getTableClassName(clazz), new Table<>(clazz, "id", null));
+        } finally {
+            tablesLock.unlock();
+        }
+    }
+
+    static <T extends HasId> void removeTableForUnsetJournalSupportTestOnly(Class<T> clazz) {
+        tablesLock.lock();
+        try {
+            tables.remove(ReflectionUtil.getTableClassName(clazz));
+        } finally {
+            tablesLock.unlock();
+        }
     }
 
     /**

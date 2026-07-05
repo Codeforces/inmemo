@@ -72,6 +72,14 @@ public class Table<T extends HasId> {
         Table.journalsDir = journalsDir;
     }
 
+    static File getJournalsDirForTesting() {
+        return journalsDir;
+    }
+
+    static void setJournalsDirForTesting(File journalsDir) {
+        Table.journalsDir = journalsDir;
+    }
+
     Table(Class<T> clazz, String indicatorField, Inmemo.Filter<T> rowFilter) {
         this.clazz = clazz;
         if (indicatorField.contains("@")) {
@@ -85,6 +93,11 @@ public class Table<T extends HasId> {
         clazzSpec = ReflectionUtil.getTableClassSpec(clazz);
         ids = Inmemo.getNoSizeSupportClasses().contains(clazz) ? null : new TLongHashSet();
         this.rowFilter = rowFilter;
+        if (Inmemo.isJournalSupportUnset(clazz)) {
+            journal = null;
+            useJournal = false;
+            deleteStaleJournalFileQuietly();
+        }
     }
 
     void createUpdater(Object initialIndicatorValue) {
@@ -331,6 +344,17 @@ public class Table<T extends HasId> {
                 logger.error(message);
                 throw new IOException(message);
             }
+        }
+    }
+
+    private void deleteStaleJournalFileQuietly() {
+        try {
+            deleteJournal();
+            logger.info("Journal support is disabled for table '" + clazz.getSimpleName()
+                    + "', stale journal file (if any) has been deleted.");
+        } catch (IOException | RuntimeException e) {
+            logger.error("Journal support is disabled for table '" + clazz.getSimpleName()
+                    + "', but failed to delete stale journal file.", e);
         }
     }
 
