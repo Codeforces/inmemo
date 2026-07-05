@@ -3,15 +3,14 @@ package com.codeforces.inmemo;
 import gnu.trove.set.TLongSet;
 import gnu.trove.set.hash.TLongHashSet;
 import org.apache.log4j.Logger;
-import org.jacuzzi.core.ArrayMap;
 import org.jacuzzi.core.Row;
 import org.jacuzzi.core.RowRoll;
-import org.xerial.snappy.SnappyInputStream;
-import org.xerial.snappy.SnappyOutputStream;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Date;
@@ -31,7 +30,6 @@ import java.util.regex.Pattern;
 public class Table<T extends HasId> {
     private static final Logger logger = Logger.getLogger(Table.class);
     private static final Pattern INDICATOR_FIELD_SPLIT_PATTERN = Pattern.compile("@");
-    private static final int JOURNAL_STREAM_BUFFER_SIZE = 4 * 1024 * 1024;
 
     private final Lock lock = new ReentrantLock();
 
@@ -49,7 +47,7 @@ public class Table<T extends HasId> {
     private volatile boolean preloaded;
     private final TLongSet ids;
 
-    private RowRoll journal = new RowRoll();
+    private JournalWriter journalWriter;
     private boolean useJournal = true;
     private static File journalsDir = new File(".");
     private final AtomicInteger insertOrUpdateCount = new AtomicInteger();
@@ -94,14 +92,26 @@ public class Table<T extends HasId> {
         ids = Inmemo.getNoSizeSupportClasses().contains(clazz) ? null : new TLongHashSet();
         this.rowFilter = rowFilter;
         if (Inmemo.isJournalSupportUnset(clazz)) {
-            journal = null;
             useJournal = false;
             deleteStaleJournalFileQuietly();
+        }
+        if (useJournal) {
+            journalWriter = createJournalWriter();
         }
     }
 
     void createUpdater(Object initialIndicatorValue) {
+        setJournalEligible(initialIndicatorValue == null);
         tableUpdater = new TableUpdater<>(this, initialIndicatorValue);
+    }
+
+    void setJournalEligible(boolean journalEligible) {
+        if (!useJournal) {
+            journalWriter = null;
+            return;
+        }
+
+        journalWriter = journalEligible ? createJournalWriter() : null;
     }
 
     void runUpdater() {
@@ -227,8 +237,8 @@ public class Table<T extends HasId> {
     private void internalInsertOrUpdate(@Nonnull T item, @Nullable Row row) {
         lock.lock();
         try {
-            if (journal != null && row != null) {
-                journal.addRow(row);
+            if (journalWriter != null && row != null) {
+                journalWriter.addRow(row);
             }
 
             if (ids != null) {
@@ -338,12 +348,20 @@ public class Table<T extends HasId> {
 
     void deleteJournal() throws IOException {
         File journalFile = new File(journalsDir, getInmemoFilename());
-        if (journalFile.isFile()) {
-            if (!journalFile.delete()) {
-                String message = "Journal has not been deleted [table='" + clazz.getSimpleName() + "'].";
-                logger.error(message);
-                throw new IOException(message);
-            }
+        deleteFile(journalFile);
+        deleteFile(new File(journalsDir, getInmemoFilename() + ".tmp"));
+    }
+
+    private void deleteFile(File file) throws IOException {
+        if (!file.isFile()) {
+            return;
+        }
+
+        if (!file.delete()) {
+            String message = "Journal has not been deleted [table='" + clazz.getSimpleName()
+                    + "', file='" + file.getAbsolutePath() + "'].";
+            logger.error(message);
+            throw new IOException(message);
         }
     }
 
@@ -363,25 +381,11 @@ public class Table<T extends HasId> {
     }
 
     void writeJournal() throws IOException {
-        if (useJournal && journal != null) {
-            if (journal.isEmpty()) {
-                logger.warn("Journal has not been dumped because of empty journal [table='" + clazz.getSimpleName() + "'].");
-                return;
-            }
-
-            File journalFile = new File(journalsDir, getInmemoFilename());
+        if (useJournal && journalWriter != null) {
             lock.lock();
             try {
-                long startTimeMillis = System.currentTimeMillis();
-                try (OutputStream outputStream = new SnappyOutputStream(new BufferedOutputStream(
-                        Files.newOutputStream(journalFile.toPath()), JOURNAL_STREAM_BUFFER_SIZE))) {
-                    ArrayMap.writeRowRoll(outputStream, journal);
-                }
-                long writeRowRollTimeMillis = System.currentTimeMillis() - startTimeMillis;
-                logger.info("Journal binary data has been prepared and written in "
-                        + writeRowRollTimeMillis + " ms [table='" + clazz.getSimpleName()
-                        + "', size=" + journal.size() + ", bytes=" + journalFile.length() + "].");
-                journal = null;
+                journalWriter.finish();
+                journalWriter = null;
             } finally {
                 lock.unlock();
             }
@@ -394,39 +398,12 @@ public class Table<T extends HasId> {
         }
 
         File journalFile = new File(journalsDir, getInmemoFilename());
-        if (journalFile.isFile()) {
-            long startTimeMillis = System.currentTimeMillis();
-            InputStream inputStream = null;
-            try {
-                inputStream = new SnappyInputStream(new BufferedInputStream(
-                        Files.newInputStream(journalFile.toPath()), JOURNAL_STREAM_BUFFER_SIZE));
-                RowRoll rowRoll = ArrayMap.readRowRoll(inputStream);
-                long durationTimeMillis = System.currentTimeMillis() - startTimeMillis;
-                logger.info("Journal binary data has been read and parsed in "
-                        + durationTimeMillis + " ms [table='" + clazz.getSimpleName()
-                        + "', bytes=" + journalFile.length() + "].");
-                return rowRoll;
-            } catch (ClassCastException e) {
-                logger.error("ClassCastException: Unable to read journal [table='" + clazz.getSimpleName() + "'].", e);
-                return null;
-            } catch (IOException e) {
-                logger.error("IOException: Unable to read journal [table='" + clazz.getSimpleName() + "'].", e);
-                return null;
-            } finally {
-                if (inputStream != null) {
-                    try {
-                        inputStream.close();
-                    } catch (IOException e) {
-                        logger.error("Unable to close journal after reading [table='" + clazz.getSimpleName() + "'].", e);
-                        // No operations.
-                    }
-                }
-            }
-        } else {
-            logger.info("Can't read journal because of no file '" + journalFile + "'.");
+        try {
+            return JournalReader.readAll(journalFile, clazz, clazzSpec);
+        } catch (Exception e) {
+            logger.error("Unexpected exception while reading journal [table='" + clazz.getSimpleName() + "'].", e);
+            return null;
         }
-
-        return null;
     }
 
     boolean isUseJournal() {
@@ -435,8 +412,11 @@ public class Table<T extends HasId> {
 
     /* init. */ {
         if (!"true".equals(System.getProperty("Inmemo.UseJournal"))) {
-            journal = null;
             useJournal = false;
         }
+    }
+
+    private JournalWriter createJournalWriter() {
+        return new JournalWriter(new File(journalsDir, getInmemoFilename()), clazz, clazzSpec);
     }
 }
