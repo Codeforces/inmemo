@@ -48,10 +48,13 @@ final class ReflectionUtil {
 
             StringBuilder result = new StringBuilder();
             for (PropertyDescriptor propertyDescriptor : beanInfo.getPropertyDescriptors()) {
-                result.append(propertyDescriptor.getName())
-                        .append(':')
-                        .append(propertyDescriptor.getPropertyType().getName())
-                        .append(',');
+                Class<?> propertyType = propertyDescriptor.getPropertyType();
+                if (propertyType != null) {
+                    result.append(propertyDescriptor.getName())
+                            .append(':')
+                            .append(propertyType.getName())
+                            .append(',');
+                }
             }
 
             return result.toString();
