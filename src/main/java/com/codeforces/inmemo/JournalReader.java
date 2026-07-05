@@ -178,16 +178,25 @@ final class JournalReader implements AutoCloseable {
                 } else {
                     logger.warn("Journal blocks have different column sets [table='" + tableClass.getSimpleName() + "'].");
                     List<String> unionKeys = unionKeys(resultKeys, blockKeys);
-                    RowRoll rebuilt = new RowRoll();
-                    rebuilt.setKeys(unionKeys.toArray(new String[0]));
-                    for (int i = 0; i < result.size(); i++) {
-                        rebuilt.addRow(result.getRow(i));
+                    RowRoll rebuilt = null;
+                    if (!sameKeys(resultKeys, unionKeys)) {
+                        rebuilt = new RowRoll();
+                        rebuilt.setKeys(unionKeys.toArray(new String[0]));
+                        for (int i = 0; i < result.size(); i++) {
+                            rebuilt.addRow(result.getRow(i));
+                        }
                     }
                     for (int i = 0; i < block.size(); i++) {
-                        rebuilt.addRow(block.getRow(i));
+                        if (rebuilt == null) {
+                            result.addRow(block.getRow(i));
+                        } else {
+                            rebuilt.addRow(block.getRow(i));
+                        }
                     }
-                    result = rebuilt;
-                    resultKeys = unionKeys;
+                    if (rebuilt != null) {
+                        result = rebuilt;
+                        resultKeys = unionKeys;
+                    }
                 }
             }
 

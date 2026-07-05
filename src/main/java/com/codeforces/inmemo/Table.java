@@ -397,14 +397,18 @@ public class Table<T extends HasId> {
     }
 
     void writeJournal() throws IOException {
-        if (useJournal && journalWriter != null) {
-            lock.lock();
-            try {
+        if (!useJournal) {
+            return;
+        }
+
+        lock.lock();
+        try {
+            if (journalWriter != null) {
                 journalWriter.finish();
                 journalWriter = null;
-            } finally {
-                lock.unlock();
             }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -447,6 +451,15 @@ public class Table<T extends HasId> {
     private void setJournalWriter(JournalWriter journalWriter) {
         lock.lock();
         try {
+            if (this.journalWriter == journalWriter) {
+                return;
+            }
+
+            JournalWriter oldJournalWriter = this.journalWriter;
+            this.journalWriter = null;
+            if (oldJournalWriter != null) {
+                oldJournalWriter.finish();
+            }
             this.journalWriter = journalWriter;
         } finally {
             lock.unlock();

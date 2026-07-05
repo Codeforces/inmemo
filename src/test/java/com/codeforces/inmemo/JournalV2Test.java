@@ -2,6 +2,7 @@ package com.codeforces.inmemo;
 
 import com.codeforces.inmemo.model.JournalDisabledUser;
 import com.codeforces.inmemo.model.JournalEnabledUser;
+import org.apache.log4j.Logger;
 import org.hsqldb.jdbc.JDBCDataSource;
 import org.jacuzzi.core.ArrayMap;
 import org.jacuzzi.core.Row;
@@ -10,9 +11,11 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.xerial.snappy.Snappy;
 import org.xerial.snappy.SnappyInputStream;
 
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -23,8 +26,11 @@ import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.util.Arrays;
+import java.util.zip.CRC32;
 
 public class JournalV2Test {
+    private static final Logger logger = Logger.getLogger(JournalV2Test.class);
+
     private String oldUseJournalProperty;
     private String oldBlockRowsProperty;
     private String oldTargetBytesProperty;
@@ -212,6 +218,140 @@ public class JournalV2Test {
     }
 
     @Test
+    public void testSchemaDriftReadAllKeepsExistingUnionForSubsetBlocks() {
+        System.setProperty(JournalFormat.BLOCK_ROWS_PROPERTY, "1");
+
+        JournalWriter writer = new JournalWriter(journalFile(JournalEnabledUser.class),
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+        writer.addRow(row(1L, "first", "first@example.com"));
+        writer.addRow(rowWithoutEmail(2L, "second"));
+        writer.addRow(rowWithoutEmail(3L, "third"));
+        writer.finish();
+
+        RowRoll rows = JournalReader.readAll(journalFile(JournalEnabledUser.class),
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+
+        Assert.assertNotNull(rows);
+        Assert.assertEquals(3, rows.size());
+        Assert.assertEquals("first@example.com", rows.getRow(0).get("email"));
+        Assert.assertNull(rows.getRow(1).get("email"));
+        Assert.assertNull(rows.getRow(2).get("email"));
+    }
+
+    @Test
+    public void testSameKeySetDifferentOrderReadAll() {
+        System.setProperty(JournalFormat.BLOCK_ROWS_PROPERTY, "1");
+
+        JournalWriter writer = new JournalWriter(journalFile(JournalEnabledUser.class),
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+        writer.addRow(row(1L, "first", "first@example.com"));
+        writer.addRow(rowDifferentOrder(2L, "second", "second@example.com"));
+        writer.finish();
+
+        RowRoll rows = JournalReader.readAll(journalFile(JournalEnabledUser.class),
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+
+        Assert.assertNotNull(rows);
+        Assert.assertEquals(2, rows.size());
+        Assert.assertEquals("first", rows.getRow(0).get("handle"));
+        Assert.assertEquals("second@example.com", rows.getRow(1).get("email"));
+    }
+
+    @Test
+    public void testIllegalBlockHeadersDoNotAllocatePayload() throws Exception {
+        assertIllegalBlockHeader(Integer.MAX_VALUE, 1, 1);
+        assertIllegalBlockHeader(-1, 1, 1);
+        assertIllegalBlockHeader(1, Integer.MAX_VALUE, 1);
+        assertIllegalBlockHeader(1, -1, 1);
+        assertIllegalBlockHeader(1, 1, Integer.MAX_VALUE);
+        assertIllegalBlockHeader(1, 1, -1);
+        assertIllegalBlockHeader(1, 16, 1000);
+
+        int compressedLength = Snappy.maxCompressedLength(1) + 1;
+        writeBlockHeaderOnly(1, 1, compressedLength);
+        try (RandomAccessFile file = new RandomAccessFile(journalFile(JournalEnabledUser.class), "rw")) {
+            file.setLength(file.length() + compressedLength);
+        }
+        assertReaderNextBlockStatus(JournalReader.Status.TRUNCATED);
+    }
+
+    @Test
+    public void testIllegalHeaderStringLengthsAreFormatMismatch() throws Exception {
+        writeHeaderWithIllegalClassNameLength(Integer.MAX_VALUE);
+        assertReaderStatus(JournalReader.Status.FORMAT_MISMATCH);
+
+        writeHeaderWithIllegalClassNameLength(0);
+        assertReaderStatus(JournalReader.Status.FORMAT_MISMATCH);
+
+        writeHeaderWithIllegalClassSpecLength(Integer.MAX_VALUE);
+        assertReaderStatus(JournalReader.Status.FORMAT_MISMATCH);
+
+        writeHeaderWithIllegalClassSpecLength(0);
+        assertReaderStatus(JournalReader.Status.FORMAT_MISMATCH);
+    }
+
+    @Test
+    public void testBlockPayloadRowCountMismatchIsTruncated() throws Exception {
+        writeUpperRows(1L);
+        overwriteFirstBlockRowCount(journalFile(JournalEnabledUser.class), 2);
+
+        assertReaderNextBlockStatus(JournalReader.Status.TRUNCATED);
+    }
+
+    @Test
+    public void testBlockPayloadTrailingBytesAreTruncated() throws Exception {
+        RowRoll rowRoll = new RowRoll();
+        rowRoll.addRow(row(1L, "first", "first@example.com"));
+        writePayloadBlock(rowRoll, new byte[]{0});
+
+        assertReaderNextBlockStatus(JournalReader.Status.TRUNCATED);
+    }
+
+    @Test
+    public void testJournalCreatedTooFarInFutureIsExpired() throws Exception {
+        writeHeaderOnlyJournal(System.currentTimeMillis() + 2L * 60L * 60L * 1000L);
+
+        assertReaderStatus(JournalReader.Status.EXPIRED);
+        Assert.assertFalse(journalFile(JournalEnabledUser.class).exists());
+    }
+
+    @Test
+    public void testNonPositiveJournalCreatedAtIsFormatMismatch() throws Exception {
+        writeHeaderOnlyJournal(0L);
+        assertReaderStatus(JournalReader.Status.FORMAT_MISMATCH);
+        Assert.assertTrue(journalFile(JournalEnabledUser.class).exists());
+
+        writeHeaderOnlyJournal(-1L);
+        assertReaderStatus(JournalReader.Status.FORMAT_MISMATCH);
+        Assert.assertTrue(journalFile(JournalEnabledUser.class).exists());
+    }
+
+    @Test
+    public void testJournalPropertiesAreClampedAndDefaulted() {
+        System.setProperty(JournalFormat.BLOCK_ROWS_PROPERTY, "0");
+        Assert.assertEquals(1, JournalFormat.getBlockRows(logger));
+        System.setProperty(JournalFormat.BLOCK_ROWS_PROPERTY, Integer.toString(Integer.MAX_VALUE));
+        Assert.assertEquals(JournalFormat.MAX_BLOCK_ROWS, JournalFormat.getBlockRows(logger));
+        System.setProperty(JournalFormat.BLOCK_ROWS_PROPERTY, "bad");
+        Assert.assertEquals(JournalFormat.DEFAULT_BLOCK_ROWS, JournalFormat.getBlockRows(logger));
+
+        System.setProperty(JournalFormat.TARGET_RAW_BYTES_PROPERTY, "1");
+        Assert.assertEquals(JournalFormat.MIN_TARGET_RAW_BYTES, JournalFormat.getTargetRawBytes(logger));
+        System.setProperty(JournalFormat.TARGET_RAW_BYTES_PROPERTY,
+                Integer.toString(JournalFormat.MAX_BLOCK_RAW_BYTES));
+        Assert.assertEquals(JournalFormat.MAX_BLOCK_RAW_BYTES / 2, JournalFormat.getTargetRawBytes(logger));
+        System.setProperty(JournalFormat.TARGET_RAW_BYTES_PROPERTY, "bad");
+        Assert.assertEquals(JournalFormat.DEFAULT_TARGET_RAW_BYTES, JournalFormat.getTargetRawBytes(logger));
+
+        System.setProperty(JournalFormat.MAX_AGE_HOURS_PROPERTY, "0");
+        Assert.assertEquals(60L * 60L * 1000L, JournalFormat.getMaxAgeMillis(logger));
+        System.setProperty(JournalFormat.MAX_AGE_HOURS_PROPERTY, Long.toString(24L * 365L + 1L));
+        Assert.assertEquals(24L * 365L * 60L * 60L * 1000L, JournalFormat.getMaxAgeMillis(logger));
+        System.setProperty(JournalFormat.MAX_AGE_HOURS_PROPERTY, "bad");
+        Assert.assertEquals(36L * 60L * 60L * 1000L, JournalFormat.getMaxAgeMillis(logger));
+    }
+
+    @Test
     public void testUnsupportedValueDisablesWriterWithoutException() throws Exception {
         Table<JournalEnabledUser> table = new Table<>(JournalEnabledUser.class, "id", null);
         Row row = new Row(4);
@@ -271,6 +411,42 @@ public class JournalV2Test {
     }
 
     @Test
+    public void testRandomizedUpdateDoesNotSleepBetweenJournalBlocks() throws Exception {
+        createDataSourceWithRows(1L, 2L, 3L, 4L, 5L);
+        writeUpperRows(1L, 2L, 3L);
+
+        Table<JournalEnabledUser> table = new Table<>(JournalEnabledUser.class, "ID", null);
+        table.disableJournalWriter();
+        RecordingTableUpdater updater = new RecordingTableUpdater(table);
+
+        updater.randomizedUpdate();
+        Assert.assertEquals(0, updater.sleepCount);
+        Assert.assertEquals(2, table.size());
+
+        updater.randomizedUpdate();
+        Assert.assertEquals(0, updater.sleepCount);
+        Assert.assertEquals(3, table.size());
+
+        updater.randomizedUpdate();
+        Assert.assertEquals(1, updater.sleepCount);
+        Assert.assertEquals(5, table.size());
+
+        table.writeJournal();
+    }
+
+    @Test
+    public void testUpdaterWithInitialIndicatorValueDoesNotWriteJournal() throws Exception {
+        createDataSourceWithRows(1L, 2L);
+
+        Table<JournalEnabledUser> table = new Table<>(JournalEnabledUser.class, "ID", null);
+        table.createUpdater(1L);
+        runUpdaterUntilPreloaded(table, 4);
+
+        Assert.assertFalse(journalFile(JournalEnabledUser.class).exists());
+        Assert.assertFalse(tmpJournalFile(JournalEnabledUser.class).exists());
+    }
+
+    @Test
     public void testTruncatedTailWithPrefixDoesNotRewriteJournal() throws Exception {
         createDataSourceWithRows(1L, 2L, 3L, 4L, 5L, 6L);
         writeUpperRows(1L, 2L, 3L, 4L, 5L);
@@ -299,7 +475,7 @@ public class JournalV2Test {
         writeUpperRows(1L, 2L, 3L);
 
         File file = journalFile(JournalEnabledUser.class);
-        corruptFirstBlockRowCount(file);
+        overwriteFirstBlockRowCount(file, 0);
         byte[] corruptedBytes = Files.readAllBytes(file.toPath());
 
         Table<JournalEnabledUser> table = createUpdaterTable();
@@ -379,12 +555,78 @@ public class JournalV2Test {
     private void writeHeaderOnlyJournal(long createdAtMillis) throws IOException {
         try (DataOutputStream outputStream = new DataOutputStream(Files.newOutputStream(
                 journalFile(JournalEnabledUser.class).toPath()))) {
+            writeJournalHeader(outputStream, createdAtMillis);
+        }
+    }
+
+    private void writeHeaderWithIllegalClassNameLength(int classNameLength) throws IOException {
+        try (DataOutputStream outputStream = new DataOutputStream(Files.newOutputStream(
+                journalFile(JournalEnabledUser.class).toPath()))) {
             outputStream.write(JournalFormat.MAGIC);
             outputStream.writeInt(JournalFormat.VERSION);
-            outputStream.writeLong(createdAtMillis);
-            writeHeaderString(outputStream, ReflectionUtil.getTableClassName(JournalEnabledUser.class));
-            writeHeaderString(outputStream, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+            outputStream.writeLong(System.currentTimeMillis());
+            outputStream.writeInt(classNameLength);
         }
+    }
+
+    private void writeHeaderWithIllegalClassSpecLength(int classSpecLength) throws IOException {
+        try (DataOutputStream outputStream = new DataOutputStream(Files.newOutputStream(
+                journalFile(JournalEnabledUser.class).toPath()))) {
+            outputStream.write(JournalFormat.MAGIC);
+            outputStream.writeInt(JournalFormat.VERSION);
+            outputStream.writeLong(System.currentTimeMillis());
+            writeHeaderString(outputStream, ReflectionUtil.getTableClassName(JournalEnabledUser.class));
+            outputStream.writeInt(classSpecLength);
+        }
+    }
+
+    private void assertIllegalBlockHeader(int rowCount, int rawLength, int compressedLength) throws IOException {
+        writeBlockHeaderOnly(rowCount, rawLength, compressedLength);
+        assertReaderNextBlockStatus(JournalReader.Status.TRUNCATED);
+    }
+
+    private void writeBlockHeaderOnly(int rowCount, int rawLength, int compressedLength) throws IOException {
+        try (DataOutputStream outputStream = new DataOutputStream(Files.newOutputStream(
+                journalFile(JournalEnabledUser.class).toPath()))) {
+            writeJournalHeader(outputStream, System.currentTimeMillis());
+            outputStream.writeInt(rowCount);
+            outputStream.writeInt(rawLength);
+            outputStream.writeLong(0L);
+            outputStream.writeInt(compressedLength);
+        }
+    }
+
+    private void writePayloadBlock(RowRoll rowRoll, byte[] trailingBytes) throws IOException {
+        ByteArrayOutputStream rawOutputStream = new ByteArrayOutputStream();
+        ArrayMap.writeRowRoll(rawOutputStream, rowRoll);
+        if (trailingBytes != null) {
+            rawOutputStream.write(trailingBytes);
+        }
+
+        byte[] raw = rawOutputStream.toByteArray();
+        byte[] compressed = new byte[Snappy.maxCompressedLength(raw.length)];
+        int compressedLength = Snappy.compress(raw, 0, raw.length, compressed, 0);
+
+        CRC32 crc32 = new CRC32();
+        crc32.update(raw);
+
+        try (DataOutputStream outputStream = new DataOutputStream(Files.newOutputStream(
+                journalFile(JournalEnabledUser.class).toPath()))) {
+            writeJournalHeader(outputStream, System.currentTimeMillis());
+            outputStream.writeInt(rowRoll.size());
+            outputStream.writeInt(raw.length);
+            outputStream.writeLong(crc32.getValue());
+            outputStream.writeInt(compressedLength);
+            outputStream.write(compressed, 0, compressedLength);
+        }
+    }
+
+    private void writeJournalHeader(DataOutputStream outputStream, long createdAtMillis) throws IOException {
+        outputStream.write(JournalFormat.MAGIC);
+        outputStream.writeInt(JournalFormat.VERSION);
+        outputStream.writeLong(createdAtMillis);
+        writeHeaderString(outputStream, ReflectionUtil.getTableClassName(JournalEnabledUser.class));
+        writeHeaderString(outputStream, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
     }
 
     private void createDataSourceWithRows(long... ids) throws Exception {
@@ -483,10 +725,23 @@ public class JournalV2Test {
         }
     }
 
-    private static void corruptFirstBlockRowCount(File file) throws IOException {
+    private void assertReaderStatus(JournalReader.Status expectedStatus) {
+        try (JournalReader reader = newReader(JournalEnabledUser.class)) {
+            Assert.assertEquals(expectedStatus, reader.getStatus());
+        }
+    }
+
+    private void assertReaderNextBlockStatus(JournalReader.Status expectedStatus) {
+        try (JournalReader reader = newReader(JournalEnabledUser.class)) {
+            Assert.assertNull(reader.nextBlock());
+            Assert.assertEquals(expectedStatus, reader.getStatus());
+        }
+    }
+
+    private static void overwriteFirstBlockRowCount(File file, int rowCount) throws IOException {
         try (RandomAccessFile randomAccessFile = new RandomAccessFile(file, "rw")) {
             randomAccessFile.seek(getFirstBlockOffset(file));
-            randomAccessFile.writeInt(0);
+            randomAccessFile.writeInt(rowCount);
         }
     }
 
@@ -549,6 +804,14 @@ public class JournalV2Test {
         return row;
     }
 
+    private static Row rowDifferentOrder(long id, String handle, String email) {
+        Row row = new Row(3);
+        row.put("email", email);
+        row.put("handle", handle);
+        row.put("id", id);
+        return row;
+    }
+
     private static Row upperRow(long id) {
         Row row = new Row(3);
         row.put("ID", id);
@@ -593,5 +856,18 @@ public class JournalV2Test {
 
     private interface ThrowingRunnable {
         void run() throws Exception;
+    }
+
+    private static final class RecordingTableUpdater extends TableUpdater<JournalEnabledUser> {
+        private int sleepCount;
+
+        private RecordingTableUpdater(Table<JournalEnabledUser> table) {
+            super(table, null);
+        }
+
+        @Override
+        void sleep(long timeMillis) {
+            sleepCount++;
+        }
     }
 }

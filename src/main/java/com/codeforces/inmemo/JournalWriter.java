@@ -262,6 +262,7 @@ final class JournalWriter {
     private long estimateRawBytes(Row row) {
         long result = 16;
         for (Map.Entry<String, Object> entry : row.entrySet()) {
+            // Keys are counted for every row on purpose: the estimate is an upper bound used for early flushing.
             result += estimateString(entry.getKey());
             Object value = entry.getValue();
             if (value == null) {

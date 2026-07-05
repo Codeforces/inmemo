@@ -46,6 +46,7 @@
     </scm>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <surefire.argLine>-Dfile.encoding=UTF-8 -Xmx1200M</surefire.argLine>
     </properties>
     <build>
         <plugins>
@@ -76,16 +77,22 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>2.22.2</version>
                 <configuration>
-                    <argLine>-Dfile.encoding=UTF-8</argLine>
-                    <argLine>-Xmx1200M</argLine>
-                    <!-- Uncomment to build with JDK 9+ -->
-                    <!--
-                    <argLine>&#45;&#45;add&#45;opens java.base/java.lang=ALL&#45;UNNAMED &#45;&#45;add&#45;opens java.base/java.util=ALL&#45;UNNAMED &#45;&#45;add&#45;opens java.base/java.io=ALL&#45;UNNAMED</argLine>
-                    -->
+                    <argLine>${surefire.argLine}</argLine>
                 </configuration>
             </plugin>
         </plugins>
     </build>
+    <profiles>
+        <profile>
+            <id>jdk9-plus-tests</id>
+            <activation>
+                <jdk>[9,)</jdk>
+            </activation>
+            <properties>
+                <surefire.argLine>-Dfile.encoding=UTF-8 -Xmx1200M --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.io=ALL-UNNAMED</surefire.argLine>
+            </properties>
+        </profile>
+    </profiles>
     <dependencies>
         <dependency>
             <groupId>org.xerial.snappy</groupId>

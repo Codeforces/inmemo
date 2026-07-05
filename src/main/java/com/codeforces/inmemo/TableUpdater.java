@@ -224,7 +224,7 @@ class TableUpdater<T extends HasId> {
         }
     }
 
-    private void randomizedUpdate() {
+    void randomizedUpdate() {
         UpdateResult updateResult = internalUpdate();
         if (!updateResult.journalReplayInProgress) {
             sleepBetweenRescans(updateResult.updatedIds.size());
@@ -423,7 +423,7 @@ class TableUpdater<T extends HasId> {
         return RESCAN_TIME_MILLIS;
     }
 
-    private void sleep(long timeMillis) {
+    void sleep(long timeMillis) {
         try {
             Thread.sleep(timeMillis);
         } catch (InterruptedException e) {
