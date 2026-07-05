@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -292,6 +293,34 @@ public class Table<T extends HasId> {
 
     List<T> findAndUpdateByEmergencyQueryFields(Object[] fields) {
         return tableUpdater.findAndUpdateByEmergencyQueryFields(fields);
+    }
+
+    void logBucketStats() {
+        lock.lock();
+        try {
+            for (Index<T, ?> index : indices.values()) {
+                Index.BucketStats bucketStats = index.getBucketStats();
+                if (bucketStats == null) {
+                    continue;
+                }
+
+                logger.info("Inmemo bucket stats [table="
+                        + ReflectionUtil.getTableClassName(clazz)
+                        + ", index="
+                        + index.getName()
+                        + ", buckets="
+                        + bucketStats.getBucketCount()
+                        + ", totalBucketSize="
+                        + bucketStats.getTotalBucketSize()
+                        + ", avgBucketSize="
+                        + String.format(Locale.US, "%.2f", bucketStats.getAverageBucketSize())
+                        + ", maxBucketSize="
+                        + bucketStats.getMaxBucketSize()
+                        + "].");
+            }
+        } finally {
+            lock.unlock();
+        }
     }
 
     void deleteJournal() throws IOException {

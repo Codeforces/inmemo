@@ -267,6 +267,30 @@ public class Index<T extends HasId, V> {
         return internalFindCount((V) value, predicate);
     }
 
+    @Nullable
+    BucketStats getBucketStats() {
+        if (unique) {
+            return null;
+        }
+
+        assert map != null;
+
+        long bucketCount = 0;
+        long totalBucketSize = 0;
+        int maxBucketSize = 0;
+
+        for (TLongObjectMap<T> bucket : map.values()) {
+            int bucketSize = bucket.size();
+            bucketCount++;
+            totalBucketSize += bucketSize;
+            if (bucketSize > maxBucketSize) {
+                maxBucketSize = bucketSize;
+            }
+        }
+
+        return new BucketStats(bucketCount, totalBucketSize, maxBucketSize);
+    }
+
     /**
      * Helper interface to emergency query database if object is not found in memory.
      */
@@ -276,5 +300,37 @@ public class Index<T extends HasId, V> {
          * @return mixed array of pairs: (database column name, value). So the length of array is always even.
          */
         Object[] getEmergencyQueryFields(@Nullable V indexValue);
+    }
+
+    static final class BucketStats {
+        private final long bucketCount;
+        private final long totalBucketSize;
+        private final int maxBucketSize;
+
+        private BucketStats(long bucketCount, long totalBucketSize, int maxBucketSize) {
+            this.bucketCount = bucketCount;
+            this.totalBucketSize = totalBucketSize;
+            this.maxBucketSize = maxBucketSize;
+        }
+
+        long getBucketCount() {
+            return bucketCount;
+        }
+
+        long getTotalBucketSize() {
+            return totalBucketSize;
+        }
+
+        int getMaxBucketSize() {
+            return maxBucketSize;
+        }
+
+        double getAverageBucketSize() {
+            if (bucketCount == 0) {
+                return 0.0;
+            }
+
+            return (double) totalBucketSize / bucketCount;
+        }
     }
 }

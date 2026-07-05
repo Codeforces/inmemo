@@ -356,6 +356,7 @@ class TableUpdater<T extends HasId> {
                     logger.log(totalTimeMillis < TimeUnit.SECONDS.toMillis(1) ? Level.INFO : Level.WARN, "Inmemo preloaded " + ReflectionUtil.getTableClassName(table.getClazz())
                             + " in " + totalTimeMillis + " ms.");
                 }
+                table.logBucketStats();
                 table.setPreloaded(true);
             }
 
