@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -71,6 +72,14 @@ public class Table<T extends HasId> {
         Table.journalsDir = journalsDir;
     }
 
+    static File getJournalsDirForTesting() {
+        return journalsDir;
+    }
+
+    static void setJournalsDirForTesting(File journalsDir) {
+        Table.journalsDir = journalsDir;
+    }
+
     Table(Class<T> clazz, String indicatorField, Inmemo.Filter<T> rowFilter) {
         this.clazz = clazz;
         if (indicatorField.contains("@")) {
@@ -84,6 +93,11 @@ public class Table<T extends HasId> {
         clazzSpec = ReflectionUtil.getTableClassSpec(clazz);
         ids = Inmemo.getNoSizeSupportClasses().contains(clazz) ? null : new TLongHashSet();
         this.rowFilter = rowFilter;
+        if (Inmemo.isJournalSupportUnset(clazz)) {
+            journal = null;
+            useJournal = false;
+            deleteStaleJournalFileQuietly();
+        }
     }
 
     void createUpdater(Object initialIndicatorValue) {
@@ -294,6 +308,34 @@ public class Table<T extends HasId> {
         return tableUpdater.findAndUpdateByEmergencyQueryFields(fields);
     }
 
+    void logBucketStats() {
+        lock.lock();
+        try {
+            for (Index<T, ?> index : indices.values()) {
+                Index.BucketStats bucketStats = index.getBucketStats();
+                if (bucketStats == null) {
+                    continue;
+                }
+
+                logger.info("Inmemo bucket stats [table="
+                        + ReflectionUtil.getTableClassName(clazz)
+                        + ", index="
+                        + index.getName()
+                        + ", buckets="
+                        + bucketStats.getBucketCount()
+                        + ", totalBucketSize="
+                        + bucketStats.getTotalBucketSize()
+                        + ", avgBucketSize="
+                        + String.format(Locale.US, "%.2f", bucketStats.getAverageBucketSize())
+                        + ", maxBucketSize="
+                        + bucketStats.getMaxBucketSize()
+                        + "].");
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
     void deleteJournal() throws IOException {
         File journalFile = new File(journalsDir, getInmemoFilename());
         if (journalFile.isFile()) {
@@ -302,6 +344,17 @@ public class Table<T extends HasId> {
                 logger.error(message);
                 throw new IOException(message);
             }
+        }
+    }
+
+    private void deleteStaleJournalFileQuietly() {
+        try {
+            deleteJournal();
+            logger.info("Journal support is disabled for table '" + clazz.getSimpleName()
+                    + "', stale journal file (if any) has been deleted.");
+        } catch (IOException | RuntimeException e) {
+            logger.error("Journal support is disabled for table '" + clazz.getSimpleName()
+                    + "', but failed to delete stale journal file.", e);
         }
     }
 
