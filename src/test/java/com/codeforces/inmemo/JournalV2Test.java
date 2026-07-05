@@ -13,11 +13,11 @@ import org.junit.Test;
 import org.xerial.snappy.SnappyInputStream;
 
 import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.sql.Connection;
@@ -349,8 +349,8 @@ public class JournalV2Test {
     public void testRollbackPreflightOldReaderGetsCatchableException() throws Exception {
         writeFiveRows();
 
-        try (InputStream inputStream = new SnappyInputStream(new BufferedInputStream(
-                Files.newInputStream(journalFile(JournalEnabledUser.class).toPath())))) {
+        byte[] journalBytes = Files.readAllBytes(journalFile(JournalEnabledUser.class).toPath());
+        try (SnappyInputStream inputStream = new SnappyInputStream(new ByteArrayInputStream(journalBytes))) {
             ArrayMap.readRowRoll(inputStream);
             Assert.fail("Old reader must not read v2 journal.");
         } catch (IOException | ClassCastException expected) {
