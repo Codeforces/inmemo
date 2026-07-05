@@ -57,6 +57,10 @@ class TableUpdater<T extends HasId> {
     private final long startTimeMillis;
 
     private final Map<Long, Integer> lastEntityIdsUpdateCount = new ConcurrentHashMap<>();
+    private final boolean journalReplayEligible;
+    private boolean replayFinished;
+    private JournalReader replayReader;
+    private long replayedRows;
 
     TableUpdater(Table<T> table, Object initialIndicatorValue) {
         if (dataSource == null) {
@@ -68,6 +72,8 @@ class TableUpdater<T extends HasId> {
 
         this.table = table;
         this.lastIndicatorValue.set(initialIndicatorValue);
+        this.journalReplayEligible = initialIndicatorValue == null && table.isUseJournal();
+        this.replayFinished = !journalReplayEligible;
 
         DataSource clazzDataSource = dataSourceByClazzName.get(table.getClazz().getName());
         jacuzzi = Jacuzzi.getJacuzzi(clazzDataSource == null ? dataSource : clazzDataSource);
@@ -219,17 +225,20 @@ class TableUpdater<T extends HasId> {
     }
 
     private void randomizedUpdate() {
-        List<Long> updatedIds = internalUpdate();
-        sleepBetweenRescans(updatedIds.size());
+        UpdateResult updateResult = internalUpdate();
+        if (!updateResult.journalReplayInProgress) {
+            sleepBetweenRescans(updateResult.updatedIds.size());
+        }
     }
 
-    private List<Long> internalUpdate() {
+    UpdateResult internalUpdate() {
         updateLock.lock();
 
         try {
             long startTimeMillis = System.currentTimeMillis();
             Object prevLastIndicatorValue = lastIndicatorValue.get();
-            RowRoll rows = getRecentlyChangedRows(prevLastIndicatorValue);
+            RowsResult rowsResult = getRecentlyChangedRows(prevLastIndicatorValue);
+            RowRoll rows = rowsResult.rows;
 
             long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
             long getRecentlyChangedMillis = afterGetRecentlyChangedRowsMillis - startTimeMillis;
@@ -337,7 +346,7 @@ class TableUpdater<T extends HasId> {
                         + "].");
             }
 
-            if (updatedIds.isEmpty() && !table.isPreloaded()) {
+            if (updatedIds.isEmpty() && !table.isPreloaded() && !rowsResult.journalReplayInProgress) {
                 if (table.hasSize()) {
                     logger.info("Inmemo ready to dump journal of table " + ReflectionUtil.getTableClassName(table.getClazz())
                             + " [items=" + table.size() + "].");
@@ -381,7 +390,7 @@ class TableUpdater<T extends HasId> {
                 }
             }
 
-            return trulyUpdatedIds;
+            return new UpdateResult(trulyUpdatedIds, rowsResult.journalReplayInProgress);
         } finally {
             updateLock.unlock();
         }
@@ -423,25 +432,30 @@ class TableUpdater<T extends HasId> {
         }
     }
 
-    private RowRoll getRecentlyChangedRows(Object indicatorLastValue) {
+    private RowsResult getRecentlyChangedRows(Object indicatorLastValue) {
         long startTimeMillis = System.currentTimeMillis();
-        RowRoll rows = null;
 
-        if (lastIndicatorValue.get() == null && table.isUseJournal()) {
-            RowRoll journalRows = table.readJournal();
-            if (journalRows != null && !journalRows.isEmpty()) {
-                rows = journalRows;
+        if (journalReplayEligible && !replayFinished) {
+            if (replayReader == null) {
+                replayReader = table.openJournalReader();
             }
-        }
 
-        if (rows != null) {
-            logger.info("getRecentlyChangedRows loads data of using the journal in "
-                    + (System.currentTimeMillis() - startTimeMillis)
-                    + " ms [table=" + table.getClazz().getSimpleName() + "].");
-            return rows;
+            RowRoll journalRows = replayReader.nextBlock();
+            if (journalRows != null && !journalRows.isEmpty()) {
+                replayedRows += journalRows.size();
+                logger.info("getRecentlyChangedRows loads data of using the journal in "
+                        + (System.currentTimeMillis() - startTimeMillis)
+                        + " ms [table=" + table.getClazz().getSimpleName()
+                        + ", blockRows=" + journalRows.size()
+                        + ", replayedRows=" + replayedRows + "].");
+                return new RowsResult(journalRows, true);
+            }
+
+            finishReplayAndConfigureWriter(replayReader.getStatus());
         }
 
         String forceIndexClause = table.getDatabaseIndex() == null ? "" : ("FORCE INDEX (" + table.getDatabaseIndex() + ')');
+        RowRoll rows;
 
         if (indicatorLastValue == null) {
             rows = jacuzzi.findRowRoll("SELECT * FROM "
@@ -479,7 +493,57 @@ class TableUpdater<T extends HasId> {
                     + queryTimeMillis
                     + " ms.");
         }
-        return rows;
+        return new RowsResult(rows, false);
+    }
+
+    private void finishReplayAndConfigureWriter(JournalReader.Status status) {
+        if (replayReader != null) {
+            replayReader.close();
+            replayReader = null;
+        }
+        replayFinished = true;
+
+        switch (status) {
+            case NO_FILE:
+            case FORMAT_MISMATCH:
+            case EXPIRED:
+            case EMPTY:
+                table.startFreshJournalWriter();
+                logger.info("Journal replay finished, fresh writer has been enabled [table='"
+                        + table.getClazz().getSimpleName()
+                        + "', status=" + status
+                        + ", replayedRows=" + replayedRows + "].");
+                break;
+            case CLEAN_EOF:
+                table.startAppendJournalWriter();
+                logger.info("Journal replay finished, append writer has been enabled [table='"
+                        + table.getClazz().getSimpleName()
+                        + "', status=" + status
+                        + ", replayedRows=" + replayedRows + "].");
+                break;
+            case TRUNCATED:
+                if (replayedRows == 0) {
+                    table.startFreshJournalWriter();
+                    logger.warn("Journal replay finished on first corrupted block, fresh writer has been enabled [table='"
+                            + table.getClazz().getSimpleName()
+                            + "', status=" + status
+                            + ", replayedRows=" + replayedRows + "].");
+                } else {
+                    table.disableJournalWriter();
+                    logger.warn("Journal replay finished with truncated tail, journal writer stays disabled [table='"
+                            + table.getClazz().getSimpleName()
+                            + "', status=" + status
+                            + ", replayedRows=" + replayedRows + "].");
+                }
+                break;
+            default:
+                table.disableJournalWriter();
+                logger.warn("Journal replay finished with unexpected status, journal writer stays disabled [table='"
+                        + table.getClazz().getSimpleName()
+                        + "', status=" + status
+                        + ", replayedRows=" + replayedRows + "].");
+                break;
+        }
     }
 
     @SuppressWarnings("WeakerAccess")
@@ -516,6 +580,26 @@ class TableUpdater<T extends HasId> {
             logger.warn("Inmemo update thread for "
                     + tableUpdater.table.getClazz().getName()
                     + " finished.");
+        }
+    }
+
+    static final class UpdateResult {
+        final List<Long> updatedIds;
+        final boolean journalReplayInProgress;
+
+        private UpdateResult(List<Long> updatedIds, boolean journalReplayInProgress) {
+            this.updatedIds = updatedIds;
+            this.journalReplayInProgress = journalReplayInProgress;
+        }
+    }
+
+    private static final class RowsResult {
+        private final RowRoll rows;
+        private final boolean journalReplayInProgress;
+
+        private RowsResult(RowRoll rows, boolean journalReplayInProgress) {
+            this.rows = rows;
+            this.journalReplayInProgress = journalReplayInProgress;
         }
     }
 

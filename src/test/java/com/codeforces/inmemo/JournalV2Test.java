@@ -2,6 +2,7 @@ package com.codeforces.inmemo;
 
 import com.codeforces.inmemo.model.JournalDisabledUser;
 import com.codeforces.inmemo.model.JournalEnabledUser;
+import org.hsqldb.jdbc.JDBCDataSource;
 import org.jacuzzi.core.ArrayMap;
 import org.jacuzzi.core.Row;
 import org.jacuzzi.core.RowRoll;
@@ -12,12 +13,16 @@ import org.junit.Test;
 import org.xerial.snappy.SnappyInputStream;
 
 import java.io.BufferedInputStream;
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.util.Arrays;
 
 public class JournalV2Test {
     private String oldUseJournalProperty;
@@ -223,6 +228,124 @@ public class JournalV2Test {
     }
 
     @Test
+    public void testReplayBlocksThenAppendSqlDelta() throws Exception {
+        createDataSourceWithRows(1L, 2L, 3L, 4L, 5L);
+        writeUpperRows(1L, 2L, 3L);
+
+        File file = journalFile(JournalEnabledUser.class);
+        byte[] originalBytes = Files.readAllBytes(file.toPath());
+        long originalCreatedAtMillis = readCreatedAtMillis(file);
+
+        Table<JournalEnabledUser> table = createUpdaterTable();
+        TableUpdater<JournalEnabledUser> updater = table.getTableUpdaterForTesting();
+
+        TableUpdater.UpdateResult firstBlock = updater.internalUpdate();
+        Assert.assertTrue(firstBlock.journalReplayInProgress);
+        Assert.assertEquals(2, table.size());
+        Assert.assertFalse(table.isPreloaded());
+
+        TableUpdater.UpdateResult secondBlock = updater.internalUpdate();
+        Assert.assertTrue(secondBlock.journalReplayInProgress);
+        Assert.assertEquals(3, table.size());
+        Assert.assertFalse(table.isPreloaded());
+
+        TableUpdater.UpdateResult sqlDelta = updater.internalUpdate();
+        Assert.assertFalse(sqlDelta.journalReplayInProgress);
+        Assert.assertEquals(5, table.size());
+        Assert.assertFalse(table.isPreloaded());
+
+        TableUpdater.UpdateResult finish = updater.internalUpdate();
+        Assert.assertFalse(finish.journalReplayInProgress);
+        Assert.assertTrue(table.isPreloaded());
+
+        byte[] appendedBytes = Files.readAllBytes(file.toPath());
+        Assert.assertTrue(appendedBytes.length > originalBytes.length);
+        Assert.assertTrue(startsWith(appendedBytes, originalBytes));
+        Assert.assertEquals(originalCreatedAtMillis, readCreatedAtMillis(file));
+
+        RowRoll rows = JournalReader.readAll(file,
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+        Assert.assertNotNull(rows);
+        Assert.assertEquals(5, rows.size());
+        Assert.assertEquals(5L, rows.getRow(4).get("ID"));
+    }
+
+    @Test
+    public void testTruncatedTailWithPrefixDoesNotRewriteJournal() throws Exception {
+        createDataSourceWithRows(1L, 2L, 3L, 4L, 5L, 6L);
+        writeUpperRows(1L, 2L, 3L, 4L, 5L);
+
+        File file = journalFile(JournalEnabledUser.class);
+        try (RandomAccessFile randomAccessFile = new RandomAccessFile(file, "rw")) {
+            randomAccessFile.setLength(randomAccessFile.length() - 1);
+        }
+        byte[] truncatedBytes = Files.readAllBytes(file.toPath());
+
+        Table<JournalEnabledUser> table = createUpdaterTable();
+        runUpdaterUntilPreloaded(table, 8);
+
+        Assert.assertEquals(6, table.size());
+        Assert.assertArrayEquals(truncatedBytes, Files.readAllBytes(file.toPath()));
+
+        RowRoll rows = JournalReader.readAll(file,
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+        Assert.assertNotNull(rows);
+        Assert.assertEquals(4, rows.size());
+    }
+
+    @Test
+    public void testTruncatedFirstBlockIsReplacedByFreshJournal() throws Exception {
+        createDataSourceWithRows(1L, 2L, 3L, 4L);
+        writeUpperRows(1L, 2L, 3L);
+
+        File file = journalFile(JournalEnabledUser.class);
+        corruptFirstBlockRowCount(file);
+        byte[] corruptedBytes = Files.readAllBytes(file.toPath());
+
+        Table<JournalEnabledUser> table = createUpdaterTable();
+        runUpdaterUntilPreloaded(table, 6);
+
+        byte[] healedBytes = Files.readAllBytes(file.toPath());
+        Assert.assertFalse(Arrays.equals(corruptedBytes, healedBytes));
+
+        RowRoll rows = JournalReader.readAll(file,
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+        Assert.assertNotNull(rows);
+        Assert.assertEquals(4, rows.size());
+        try (JournalReader reader = newReader(JournalEnabledUser.class)) {
+            while (reader.nextBlock() != null) {
+                // No operations.
+            }
+            Assert.assertEquals(JournalReader.Status.CLEAN_EOF, reader.getStatus());
+        }
+    }
+
+    @Test
+    public void testEmptyAppendFinishDoesNotTouchExistingJournal() throws Exception {
+        writeUpperRows(1L, 2L);
+
+        File file = journalFile(JournalEnabledUser.class);
+        byte[] before = Files.readAllBytes(file.toPath());
+        long lastModified = file.lastModified();
+
+        JournalWriter.append(file,
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class)).finish();
+
+        Assert.assertArrayEquals(before, Files.readAllBytes(file.toPath()));
+        Assert.assertEquals(lastModified, file.lastModified());
+    }
+
+    @Test
+    public void testOpeningTerminalStatusesCreateFreshJournalBeforeSql() throws Exception {
+        assertTerminalStatusCreatesFreshJournal(this::deleteJournalFiles);
+        assertTerminalStatusCreatesFreshJournal(() -> Files.write(journalFile(JournalEnabledUser.class).toPath(),
+                new byte[]{1, 2, 3}));
+        assertTerminalStatusCreatesFreshJournal(() -> writeHeaderOnlyJournal(System.currentTimeMillis()
+                - 48L * 60L * 60L * 1000L));
+        assertTerminalStatusCreatesFreshJournal(() -> writeHeaderOnlyJournal(System.currentTimeMillis()));
+    }
+
+    @Test
     public void testRollbackPreflightOldReaderGetsCatchableException() throws Exception {
         writeFiveRows();
 
@@ -244,6 +367,15 @@ public class JournalV2Test {
         table.writeJournal();
     }
 
+    private void writeUpperRows(long... ids) {
+        JournalWriter writer = new JournalWriter(journalFile(JournalEnabledUser.class),
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+        for (long id : ids) {
+            writer.addRow(upperRow(id));
+        }
+        writer.finish();
+    }
+
     private void writeHeaderOnlyJournal(long createdAtMillis) throws IOException {
         try (DataOutputStream outputStream = new DataOutputStream(Files.newOutputStream(
                 journalFile(JournalEnabledUser.class).toPath()))) {
@@ -252,6 +384,134 @@ public class JournalV2Test {
             outputStream.writeLong(createdAtMillis);
             writeHeaderString(outputStream, ReflectionUtil.getTableClassName(JournalEnabledUser.class));
             writeHeaderString(outputStream, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+        }
+    }
+
+    private void createDataSourceWithRows(long... ids) throws Exception {
+        JDBCDataSource dataSource = new JDBCDataSource();
+        dataSource.setUrl("jdbc:hsqldb:mem:journal-v2-" + System.nanoTime());
+        dataSource.setUser("sa");
+        dataSource.setPassword("");
+
+        try (Connection connection = dataSource.getConnection()) {
+            connection.createStatement().execute("DROP TABLE JournalEnabledUser IF EXISTS");
+            connection.createStatement().execute("CREATE TABLE JournalEnabledUser ("
+                    + "ID BIGINT, "
+                    + "HANDLE VARCHAR(255), "
+                    + "EMAIL VARCHAR(255))");
+
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO JournalEnabledUser (ID, HANDLE, EMAIL) VALUES (?, ?, ?)")) {
+                for (long id : ids) {
+                    statement.setLong(1, id);
+                    statement.setString(2, "u" + id);
+                    statement.setString(3, "u" + id + "@example.com");
+                    statement.executeUpdate();
+                }
+            }
+        }
+
+        TableUpdater.setDataSource(dataSource);
+    }
+
+    private Table<JournalEnabledUser> createUpdaterTable() {
+        Table<JournalEnabledUser> table = new Table<>(JournalEnabledUser.class, "ID", null);
+        table.createUpdater(null);
+        return table;
+    }
+
+    private void runUpdaterUntilPreloaded(Table<JournalEnabledUser> table, int maxIterations) {
+        TableUpdater<JournalEnabledUser> updater = table.getTableUpdaterForTesting();
+        for (int i = 0; i < maxIterations; i++) {
+            updater.internalUpdate();
+            if (table.isPreloaded()) {
+                return;
+            }
+        }
+        Assert.fail("Table has not been preloaded after " + maxIterations + " update iterations.");
+    }
+
+    private void assertTerminalStatusCreatesFreshJournal(ThrowingRunnable fileSetup) throws Exception {
+        deleteJournalFiles();
+        fileSetup.run();
+        createDataSourceWithRows(1L, 2L);
+
+        File file = journalFile(JournalEnabledUser.class);
+        Table<JournalEnabledUser> table = createUpdaterTable();
+        runUpdaterUntilPreloaded(table, 4);
+
+        Assert.assertTrue(file.isFile());
+        RowRoll rows = JournalReader.readAll(file,
+                JournalEnabledUser.class, ReflectionUtil.getTableClassSpec(JournalEnabledUser.class));
+        Assert.assertNotNull(rows);
+        Assert.assertEquals(2, rows.size());
+        try (JournalReader reader = newReader(JournalEnabledUser.class)) {
+            while (reader.nextBlock() != null) {
+                // No operations.
+            }
+            Assert.assertEquals(JournalReader.Status.CLEAN_EOF, reader.getStatus());
+        }
+    }
+
+    private void deleteJournalFiles() throws IOException {
+        Files.deleteIfExists(journalFile(JournalEnabledUser.class).toPath());
+        Files.deleteIfExists(tmpJournalFile(JournalEnabledUser.class).toPath());
+    }
+
+    private static boolean startsWith(byte[] bytes, byte[] prefix) {
+        if (bytes.length < prefix.length) {
+            return false;
+        }
+
+        for (int i = 0; i < prefix.length; i++) {
+            if (bytes[i] != prefix[i]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static long readCreatedAtMillis(File file) throws IOException {
+        try (DataInputStream inputStream = new DataInputStream(new BufferedInputStream(
+                Files.newInputStream(file.toPath())))) {
+            byte[] magic = new byte[JournalFormat.MAGIC.length];
+            inputStream.readFully(magic);
+            Assert.assertArrayEquals(JournalFormat.MAGIC, magic);
+            Assert.assertEquals(JournalFormat.VERSION, inputStream.readInt());
+            return inputStream.readLong();
+        }
+    }
+
+    private static void corruptFirstBlockRowCount(File file) throws IOException {
+        try (RandomAccessFile randomAccessFile = new RandomAccessFile(file, "rw")) {
+            randomAccessFile.seek(getFirstBlockOffset(file));
+            randomAccessFile.writeInt(0);
+        }
+    }
+
+    private static long getFirstBlockOffset(File file) throws IOException {
+        long offset = JournalFormat.MAGIC.length + 4L + 8L;
+        try (DataInputStream inputStream = new DataInputStream(new BufferedInputStream(
+                Files.newInputStream(file.toPath())))) {
+            skipFully(inputStream, JournalFormat.MAGIC.length + 4 + 8);
+            int tableClassNameLength = inputStream.readInt();
+            offset += 4L + tableClassNameLength;
+            skipFully(inputStream, tableClassNameLength);
+            int tableClassSpecLength = inputStream.readInt();
+            offset += 4L + tableClassSpecLength;
+        }
+        return offset;
+    }
+
+    private static void skipFully(DataInputStream inputStream, int bytes) throws IOException {
+        int skipped = 0;
+        while (skipped < bytes) {
+            int current = inputStream.skipBytes(bytes - skipped);
+            if (current <= 0) {
+                throw new IOException("Unexpected EOF while skipping " + bytes + " bytes.");
+            }
+            skipped += current;
         }
     }
 
@@ -289,6 +549,14 @@ public class JournalV2Test {
         return row;
     }
 
+    private static Row upperRow(long id) {
+        Row row = new Row(3);
+        row.put("ID", id);
+        row.put("HANDLE", "u" + id);
+        row.put("EMAIL", "u" + id + "@example.com");
+        return row;
+    }
+
     private static Row rowWithoutEmail(long id, String handle) {
         Row row = new Row(2);
         row.put("id", id);
@@ -321,5 +589,9 @@ public class JournalV2Test {
         if (!file.delete() && file.exists()) {
             throw new AssertionError("Can't delete " + file.getAbsolutePath());
         }
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 }

@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.Date;
 import java.util.Map;
 import java.util.zip.CRC32;
@@ -30,6 +31,7 @@ final class JournalWriter {
     private final String tableNameForLog;
     private final int blockRows;
     private final int targetRawBytes;
+    private final boolean append;
 
     private DataOutputStream outputStream;
     private RowRoll buffer = new RowRoll();
@@ -49,6 +51,14 @@ final class JournalWriter {
     private boolean failed;
 
     JournalWriter(File file, Class<?> tableClass, String tableClassSpec) {
+        this(file, tableClass, tableClassSpec, false);
+    }
+
+    static JournalWriter append(File file, Class<?> tableClass, String tableClassSpec) {
+        return new JournalWriter(file, tableClass, tableClassSpec, true);
+    }
+
+    private JournalWriter(File file, Class<?> tableClass, String tableClassSpec, boolean append) {
         this.file = file;
         this.tmpFile = new File(file.getParentFile(), file.getName() + ".tmp");
         this.tableClassName = ReflectionUtil.getTableClassName(tableClass);
@@ -56,6 +66,7 @@ final class JournalWriter {
         this.tableNameForLog = tableClass.getSimpleName();
         this.blockRows = JournalFormat.getBlockRows(logger);
         this.targetRawBytes = JournalFormat.getTargetRawBytes(logger);
+        this.append = append;
     }
 
     void addRow(Row row) {
@@ -102,6 +113,20 @@ final class JournalWriter {
 
             closeOutputStreamQuietly();
 
+            if (append) {
+                closed = true;
+                logger.info("Journal has been appended [table='" + tableNameForLog
+                        + "', blocks=" + blocks
+                        + ", rows=" + rows
+                        + ", maxRawBytes=" + maxRawBytes
+                        + ", maxCompressedBytes=" + maxCompressedBytes
+                        + ", maxFlushMillis=" + maxFlushMillis
+                        + ", fileBytes=" + file.length()
+                        + ", durationMillis=" + (System.currentTimeMillis() - startTimeMillis)
+                        + "].");
+                return;
+            }
+
             if (rows == 0) {
                 deleteTmpQuietly();
                 closed = true;
@@ -128,6 +153,18 @@ final class JournalWriter {
 
     private void openIfNeeded() throws IOException {
         if (opened) {
+            return;
+        }
+
+        if (append) {
+            if (!file.isFile()) {
+                fail("Can't append journal because file does not exist '" + file.getAbsolutePath() + "'", null);
+                return;
+            }
+
+            outputStream = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(file.toPath(),
+                    StandardOpenOption.WRITE, StandardOpenOption.APPEND), STREAM_BUFFER_SIZE));
+            opened = true;
             return;
         }
 
@@ -261,7 +298,9 @@ final class JournalWriter {
     private void fail(String message, Exception e) {
         failed = true;
         closeOutputStreamQuietly();
-        deleteTmpQuietly();
+        if (!append) {
+            deleteTmpQuietly();
+        }
         if (e == null) {
             logger.error(message + " [table='" + tableNameForLog + "'].");
         } else {

@@ -101,17 +101,33 @@ public class Table<T extends HasId> {
     }
 
     void createUpdater(Object initialIndicatorValue) {
-        setJournalEligible(initialIndicatorValue == null);
+        disableJournalWriter();
         tableUpdater = new TableUpdater<>(this, initialIndicatorValue);
     }
 
     void setJournalEligible(boolean journalEligible) {
         if (!useJournal) {
-            journalWriter = null;
+            setJournalWriter(null);
             return;
         }
 
-        journalWriter = journalEligible ? createJournalWriter() : null;
+        setJournalWriter(journalEligible ? createJournalWriter() : null);
+    }
+
+    void disableJournalWriter() {
+        setJournalWriter(null);
+    }
+
+    void startFreshJournalWriter() {
+        if (useJournal) {
+            setJournalWriter(createJournalWriter());
+        }
+    }
+
+    void startAppendJournalWriter() {
+        if (useJournal) {
+            setJournalWriter(JournalWriter.append(new File(journalsDir, getInmemoFilename()), clazz, clazzSpec));
+        }
     }
 
     void runUpdater() {
@@ -406,6 +422,14 @@ public class Table<T extends HasId> {
         }
     }
 
+    JournalReader openJournalReader() {
+        return new JournalReader(new File(journalsDir, getInmemoFilename()), clazz, clazzSpec);
+    }
+
+    TableUpdater<T> getTableUpdaterForTesting() {
+        return tableUpdater;
+    }
+
     boolean isUseJournal() {
         return useJournal;
     }
@@ -418,5 +442,14 @@ public class Table<T extends HasId> {
 
     private JournalWriter createJournalWriter() {
         return new JournalWriter(new File(journalsDir, getInmemoFilename()), clazz, clazzSpec);
+    }
+
+    private void setJournalWriter(JournalWriter journalWriter) {
+        lock.lock();
+        try {
+            this.journalWriter = journalWriter;
+        } finally {
+            lock.unlock();
+        }
     }
 }
