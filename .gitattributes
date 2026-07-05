@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+# Keep common binary artifacts untouched.
+*.jar binary
+*.zip binary
+*.gz binary
+*.ser binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
