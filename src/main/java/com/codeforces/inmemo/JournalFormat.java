@@ -15,7 +15,7 @@ final class JournalFormat {
     static final int MAX_HEADER_STRING_BYTES = 65_536;
 
     static final int DEFAULT_BLOCK_ROWS = 65_536;
-    static final int DEFAULT_TARGET_RAW_BYTES = 64 * 1024 * 1024;
+    static final int DEFAULT_TARGET_RAW_BYTES = 8 * 1024 * 1024;
     static final int MIN_TARGET_RAW_BYTES = 1 * 1024 * 1024;
 
     static final String BLOCK_ROWS_PROPERTY = "Inmemo.JournalBlockRows";
