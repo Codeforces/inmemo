@@ -7,6 +7,8 @@ import com.codeforces.inmemo.model.Wrapper;
 import com.codeforces.inmemo.model.Wrapper.a;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
 import org.apache.commons.lang3.RandomUtils;
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
 import org.jacuzzi.core.Row;
 import org.junit.Assert;
 import org.junit.Before;
@@ -16,11 +18,15 @@ import javax.sql.DataSource;
 import java.io.File;
 import java.io.IOException;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import static org.hamcrest.core.Is.is;
 import static org.hamcrest.core.IsNot.not;
@@ -33,6 +39,7 @@ public class InmemoTest {
     private static final long BASE_SLEEP_MS = 1500;
 
     private UserDao userDao;
+    private DataSource dataSource;
 
     private static DataSource newDataSource() {
         ComboPooledDataSource comboPooledDataSource = new ComboPooledDataSource();
@@ -44,7 +51,7 @@ public class InmemoTest {
 
     @Before
     public void setup() throws SQLException {
-        DataSource dataSource = newDataSource();
+        dataSource = newDataSource();
 
         userDao = new UserDaoImpl(dataSource);
 
@@ -668,6 +675,280 @@ public class InmemoTest {
             Assert.assertTrue(executorService.awaitTermination(10, TimeUnit.SECONDS));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    private void withTimestampLookback(boolean enabled, String indicator, Date floor, Consumer<Table<User>> check) {
+        String property = "Inmemo.TimestampLookback." + User.class.getName();
+        String oldLookback = System.getProperty(property);
+        String oldJournal = System.getProperty("Inmemo.UseJournal");
+        try {
+            System.clearProperty(property);
+            System.clearProperty("Inmemo.UseJournal");
+            if (enabled) {
+                System.setProperty(property, "true");
+            }
+            lookbackSql("DELETE FROM User");
+            Table<User> table = new Table<>(User.class, indicator, null);
+            table.add(Index.createUnique("ID", Long.class, User::getId));
+            table.createUpdater(floor);
+            check.accept(table);
+        } finally {
+            if (oldLookback == null) {
+                System.clearProperty(property);
+            } else {
+                System.setProperty(property, oldLookback);
+            }
+            if (oldJournal == null) {
+                System.clearProperty("Inmemo.UseJournal");
+            } else {
+                System.setProperty("Inmemo.UseJournal", oldJournal);
+            }
+        }
+    }
+
+    private void lookbackSql(String sql, Object... parameters) {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int i = 0; i < parameters.length; i++) {
+                if (parameters[i] instanceof Timestamp) {
+                    statement.setTimestamp(i + 1, (Timestamp) parameters[i]);
+                } else {
+                    statement.setObject(i + 1, parameters[i]);
+                }
+            }
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    private static Timestamp lookbackTime(int seconds) {
+        return new Timestamp(Timestamp.valueOf("2026-01-01 12:00:00").getTime() + seconds * 1000L);
+    }
+
+    private void insertLookbackUser(long id, Timestamp time) {
+        lookbackSql("INSERT INTO User (ID, HANDLE, CREATIONTIME, ADMIN, DISABLED) VALUES (?, ?, ?, FALSE, FALSE)",
+                id, "u" + id, time);
+    }
+
+    private static User findLookbackUser(Table<User> table, long id) {
+        return table.findOnly(true, new IndexConstraint<>("ID", id), user -> true);
+    }
+
+    private static void preloadLookbackTable(Table<User> table) {
+        for (int i = 0; i < 4 && !table.isPreloaded(); i++) {
+            table.getTableUpdaterForTesting().internalUpdate();
+        }
+        Assert.assertTrue(table.isPreloaded());
+    }
+
+    private static void makeLookbackDue(TableUpdater<?> updater) {
+        updater.lastTimestampLookbackNanos = System.nanoTime() - TableUpdater.TIMESTAMP_LOOKBACK_INTERVAL_NANOS;
+    }
+
+    @Test
+    public void testTimestampLookbackRecoversInsertAndEqualTimestampUpdates() {
+        withTimestampLookback(true, "CREATIONTIME", null, table -> {
+            insertLookbackUser(1, lookbackTime(14));
+            insertLookbackUser(2, lookbackTime(20));
+            preloadLookbackTable(table);
+            TableUpdater<User> updater = table.getTableUpdaterForTesting();
+            for (int i = 0; i < 10; i++) {
+                updater.internalUpdate();
+            }
+            Map<Long, String> items = new HashMap<>();
+            Map<Long, String> rows = new HashMap<>();
+            table.add(new ItemListener<>("items", user -> items.put(user.getId(), user.getHandle())));
+            table.add(new RowListener("rows", row -> rows.put((Long) row.get("ID"), (String) row.get("HANDLE"))));
+            lookbackSql("UPDATE User SET HANDLE = 'changed'");
+            insertLookbackUser(3, lookbackTime(14));
+            updater.internalUpdate();
+            Assert.assertEquals("u1", findLookbackUser(table, 1).getHandle());
+            Assert.assertEquals("u2", findLookbackUser(table, 2).getHandle());
+            Assert.assertNull(findLookbackUser(table, 3));
+            Assert.assertTrue(items.isEmpty());
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            for (long id : new long[]{1, 2, 3}) {
+                String expected = id == 3 ? "u3" : "changed";
+                Assert.assertEquals(expected, findLookbackUser(table, id).getHandle());
+                Assert.assertEquals(expected, items.get(id));
+                Assert.assertEquals(expected, rows.get(id));
+            }
+        });
+    }
+
+    @Test
+    public void testTimestampLookbackPreservesAndAdvancesCursor() {
+        withTimestampLookback(true, "CREATIONTIME", null, table -> {
+            insertLookbackUser(1, lookbackTime(20));
+            preloadLookbackTable(table);
+            TableUpdater<User> updater = table.getTableUpdaterForTesting();
+            lookbackSql("DELETE FROM User");
+            insertLookbackUser(2, lookbackTime(14));
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            Assert.assertNotNull(findLookbackUser(table, 2));
+            insertLookbackUser(3, lookbackTime(18));
+            updater.internalUpdate();
+            Assert.assertNull(findLookbackUser(table, 3));
+            insertLookbackUser(4, lookbackTime(30));
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            Assert.assertNotNull(findLookbackUser(table, 3));
+            Assert.assertNotNull(findLookbackUser(table, 4));
+            lookbackSql("DELETE FROM User WHERE ID = 4");
+            insertLookbackUser(5, lookbackTime(25));
+            updater.internalUpdate();
+            Assert.assertNull(findLookbackUser(table, 5));
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            Assert.assertNotNull(findLookbackUser(table, 5));
+        });
+    }
+
+    @Test
+    public void testTimestampLookbackEligibility() {
+        for (int mode = 0; mode < 3; mode++) {
+            boolean enabled = mode != 0;
+            String indicator = mode == 1 ? "ID" : "CREATIONTIME";
+            withTimestampLookback(enabled, indicator, null, table -> {
+                insertLookbackUser(20, lookbackTime(20));
+                TableUpdater<User> updater = table.getTableUpdaterForTesting();
+                makeLookbackDue(updater);
+                long beforePreload = updater.lastTimestampLookbackNanos;
+                preloadLookbackTable(table);
+                Assert.assertEquals(beforePreload, updater.lastTimestampLookbackNanos);
+                insertLookbackUser(14, lookbackTime(14));
+                updater.lastTimestampLookbackNanos = System.nanoTime();
+                updater.internalUpdate();
+                Assert.assertNull(findLookbackUser(table, 14));
+                System.setProperty("Inmemo.TimestampLookback." + User.class.getName(), String.valueOf(!enabled));
+                makeLookbackDue(updater);
+                long beforeDue = updater.lastTimestampLookbackNanos;
+                updater.internalUpdate();
+                if (enabled && "CREATIONTIME".equals(indicator)) {
+                    Assert.assertNotNull(findLookbackUser(table, 14));
+                    Assert.assertNotEquals(beforeDue, updater.lastTimestampLookbackNanos);
+                } else {
+                    Assert.assertNull(findLookbackUser(table, 14));
+                    Assert.assertEquals(beforeDue, updater.lastTimestampLookbackNanos);
+                }
+            });
+        }
+    }
+
+    @Test
+    public void testTimestampLookbackWindowAndEmptyResult() {
+        withTimestampLookback(true, "CREATIONTIME", null, table -> {
+            insertLookbackUser(1, new Timestamp(lookbackTime(200).getTime() + 123));
+            preloadLookbackTable(table);
+            insertLookbackUser(2, new Timestamp(lookbackTime(80).getTime() + 123));
+            insertLookbackUser(3, new Timestamp(lookbackTime(80).getTime() + 122));
+            TableUpdater<User> updater = table.getTableUpdaterForTesting();
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            Assert.assertNotNull(findLookbackUser(table, 2));
+            Assert.assertNull(findLookbackUser(table, 3));
+            lookbackSql("DELETE FROM User");
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            Assert.assertTrue(table.isPreloaded());
+        });
+    }
+
+    @Test
+    public void testTimestampLookbackInitialFloorPrecision() throws SQLException {
+        Timestamp floor;
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement("VALUES (TIMESTAMP '2026-01-01 12:00:00.123456')");
+             ResultSet result = statement.executeQuery()) {
+            Assert.assertTrue(result.next());
+            floor = result.getTimestamp(1);
+        }
+        Timestamp expectedFloor = (Timestamp) floor.clone();
+        withTimestampLookback(true, "CREATIONTIME", floor, table -> {
+            insertLookbackUser(1, lookbackTime(20));
+            preloadLookbackTable(table);
+            floor.setTime(lookbackTime(-60).getTime());
+            insertLookbackUser(2, expectedFloor);
+            insertLookbackUser(3, Timestamp.valueOf("2026-01-01 12:00:00.123455"));
+            insertLookbackUser(4, Timestamp.valueOf("2026-01-01 12:00:00.122456"));
+            TableUpdater<User> updater = table.getTableUpdaterForTesting();
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            Assert.assertNotNull(findLookbackUser(table, 2));
+            Assert.assertNull(findLookbackUser(table, 3));
+            Assert.assertNull(findLookbackUser(table, 4));
+        });
+    }
+
+    @Test
+    public void testTimestampLookbackQueryAndListenerFailures() {
+        withTimestampLookback(true, "CREATIONTIME", null, table -> {
+            insertLookbackUser(20, lookbackTime(20));
+            preloadLookbackTable(table);
+            insertLookbackUser(14, lookbackTime(14));
+            TableUpdater<User> updater = table.getTableUpdaterForTesting();
+            makeLookbackDue(updater);
+            long beforeFailure = updater.lastTimestampLookbackNanos;
+            lookbackSql("ALTER TABLE User RENAME TO UserLookbackUnavailable");
+            try {
+                Assert.assertThrows(RuntimeException.class, updater::internalUpdate);
+            } finally {
+                lookbackSql("ALTER TABLE UserLookbackUnavailable RENAME TO User");
+            }
+            Assert.assertTrue(table.isPreloaded());
+            Assert.assertNotEquals(beforeFailure, updater.lastTimestampLookbackNanos);
+            updater.internalUpdate();
+            Assert.assertNull(findLookbackUser(table, 14));
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            Assert.assertNotNull(findLookbackUser(table, 14));
+
+            for (int id = 15; id <= 17; id++) {
+                insertLookbackUser(id, lookbackTime(id));
+            }
+            boolean[] failOnce = {true};
+            table.add(new ItemListener<>("failure", user -> {
+                if (user.getId() == 16 && failOnce[0]) {
+                    failOnce[0] = false;
+                    throw new IllegalStateException("Expected listener failure");
+                }
+            }));
+            makeLookbackDue(updater);
+            Assert.assertThrows(IllegalStateException.class, updater::internalUpdate);
+            Assert.assertNotNull(findLookbackUser(table, 15));
+            Assert.assertNull(findLookbackUser(table, 17));
+            makeLookbackDue(updater);
+            updater.internalUpdate();
+            Assert.assertNotNull(findLookbackUser(table, 17));
+            Assert.assertTrue(table.isPreloaded());
+        });
+    }
+
+    @Test
+    public void testTimestampLookbackBatchDiagnostics() {
+        Logger logger = Logger.getLogger(TableUpdater.class);
+        Level oldLevel = logger.getLevel();
+        try {
+            logger.setLevel(Level.DEBUG);
+            for (int count : new int[]{11, 100}) {
+                withTimestampLookback(true, "CREATIONTIME", null, table -> {
+                    insertLookbackUser(1, lookbackTime(20));
+                    preloadLookbackTable(table);
+                    for (int id = 2; id <= count; id++) {
+                        insertLookbackUser(id, lookbackTime(14));
+                    }
+                    TableUpdater<User> updater = table.getTableUpdaterForTesting();
+                    makeLookbackDue(updater);
+                    updater.internalUpdate();
+                    Assert.assertEquals(count, table.size());
+                });
+            }
+        } finally {
+            logger.setLevel(oldLevel);
         }
     }
 

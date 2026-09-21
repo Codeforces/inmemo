@@ -9,6 +9,7 @@ import org.jacuzzi.core.TypeOracle;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
@@ -37,6 +38,12 @@ class TableUpdater<T extends HasId> {
 
     private static final int MAX_ROWS_IN_SINGLE_SQL_STATEMENT = 2_000_000;
     private static final int MAX_UPDATE_SAME_INDICATOR_TIMES = 10;
+    private static final long TIMESTAMP_LOOKBACK_WINDOW_MILLIS = TimeUnit.MINUTES.toMillis(2);
+    static final long TIMESTAMP_LOOKBACK_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(30);
+
+    private final boolean timestampLookbackEnabled;
+    private final Date initialTimestamp;
+    long lastTimestampLookbackNanos;
 
     private final Lock updateLock = new ReentrantLock();
 
@@ -72,6 +79,10 @@ class TableUpdater<T extends HasId> {
 
         this.table = table;
         this.lastIndicatorValue.set(initialIndicatorValue);
+        timestampLookbackEnabled = Boolean.getBoolean("Inmemo.TimestampLookback."
+                + ReflectionUtil.getTableClassName(table.getClazz()));
+        initialTimestamp = initialIndicatorValue instanceof Date ? (Date) ((Date) initialIndicatorValue).clone() : null;
+        lastTimestampLookbackNanos = System.nanoTime();
         this.journalReplayEligible = initialIndicatorValue == null && table.isUseJournal();
         this.replayFinished = !journalReplayEligible;
 
@@ -237,7 +248,21 @@ class TableUpdater<T extends HasId> {
         try {
             long startTimeMillis = System.currentTimeMillis();
             Object prevLastIndicatorValue = lastIndicatorValue.get();
-            RowsResult rowsResult = getRecentlyChangedRows(prevLastIndicatorValue);
+            long nowNanos = System.nanoTime();
+            boolean lookback = timestampLookbackEnabled && table.isPreloaded()
+                    && prevLastIndicatorValue instanceof Date
+                    && nowNanos - lastTimestampLookbackNanos >= TIMESTAMP_LOOKBACK_INTERVAL_NANOS;
+            Object queryBound = prevLastIndicatorValue;
+            if (lookback) {
+                Date bound = new Date(((Date) prevLastIndicatorValue).getTime() - TIMESTAMP_LOOKBACK_WINDOW_MILLIS);
+                queryBound = initialTimestamp != null && bound.getTime() <= initialTimestamp.getTime()
+                        ? initialTimestamp : bound;
+                // Jacuzzi formats Date parameters to whole seconds; preserve the lookback bound.
+                queryBound = (queryBound instanceof Timestamp ? (Timestamp) queryBound
+                        : new Timestamp(((Date) queryBound).getTime())).toString();
+                lastTimestampLookbackNanos = nowNanos;
+            }
+            RowsResult rowsResult = getRecentlyChangedRows(queryBound);
             RowRoll rows = rowsResult.rows;
 
             long afterGetRecentlyChangedRowsMillis = System.currentTimeMillis();
@@ -245,17 +270,28 @@ class TableUpdater<T extends HasId> {
 
             if (rows.size() >= 100
                     || getRecentlyChangedMillis >= TimeUnit.SECONDS.toMillis(1)) {
-                logger.error("Table '"
+                logger.log(lookback ? Level.WARN : Level.ERROR, "Table '"
                         + table.getClazz().getSimpleName()
                         + "': getRecentlyChangedRows returns "
                         + rows.size()
                         + " rows [prevLastIndicatorValue="
                         + prevLastIndicatorValue
+                        + (lookback ? ", timestampLookback=true" : "")
                         + ", lastIndicatorValue="
                         + lastIndicatorValue.get()
                         + ", thread="
                         + threadName
                         + ", time=" + getRecentlyChangedMillis + " ms].");
+            }
+
+            if (lookback) {
+                logger.debug("Timestamp lookback [table=" + table.getClazz().getSimpleName()
+                        + ", bound=" + queryBound + ", cursor=" + prevLastIndicatorValue
+                        + ", rows=" + rows.size() + "].");
+                if (rows.size() == MAX_ROWS_IN_SINGLE_SQL_STATEMENT) {
+                    logger.warn("Timestamp lookback coverage may be truncated [table="
+                            + table.getClazz().getSimpleName() + ", rows=" + rows.size() + "].");
+                }
             }
 
             boolean hasInsertOrUpdateByRow = table.hasInsertOrUpdateByRow();
@@ -267,7 +303,7 @@ class TableUpdater<T extends HasId> {
             for (int i = 0; i < rows.size(); i++) {
                 long id = (long) rows.getValue(i, idColumn);
 
-                if (Objects.equals(rows.getValue(i, indicatorFieldColumn), prevLastIndicatorValue)
+                if (!lookback && Objects.equals(rows.getValue(i, indicatorFieldColumn), prevLastIndicatorValue)
                         && lastEntityIdsUpdateCount.containsKey(id)
                         && lastEntityIdsUpdateCount.get(id) >= getMaxUpdateSameIndicatorTimes()) {
                     continue;
@@ -304,10 +340,13 @@ class TableUpdater<T extends HasId> {
                     }
                 }
 
-                lastIndicatorValue.set(row.get(table.getIndicatorField()));
+                Object indicatorValue = row.get(table.getIndicatorField());
+                if (!lookback || ((Date) indicatorValue).compareTo((Date) lastIndicatorValue.get()) > 0) {
+                    lastIndicatorValue.set(indicatorValue);
+                }
             }
 
-            if (updatedIds.size() >= 10) {
+            if (!lookback && updatedIds.size() >= 10) {
                 logger.info("Thread '"
                         + threadName
                         + "' has found "
